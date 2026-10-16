@@ -147,5 +147,49 @@ class AdminSecurityAndGovernanceTest extends TestCase
         // 4. Al abrir el reporte, la notificación queda marcada como leída
         $this->assertNotNull($notification->fresh()->read_at);
     }
+
+    public function test_admin_ui_layout_and_tabs_and_controls_render_correctly(): void
+    {
+        $admin = User::create([
+            'name' => 'Santi Super Admin',
+            'email' => 'santi_ui_admin@fusashop.com',
+            'password' => Hash::make('password123'),
+            'role' => 'analyst',
+            'admin_subrole' => 'super_admin',
+            'email_verified_at' => now(),
+        ]);
+
+        // 1. Admin Banners: verify 3 mutually exclusive visual tabs
+        $bannersResponse = $this->actingAs($admin)->get('/admin/banners');
+        $bannersResponse->assertStatus(200)
+            ->assertSee('1. Logo del Sistema')
+            ->assertSee('2. Banners Publicitarios')
+            ->assertSee('3. Tarjetas Promocionales')
+            ->assertSee('Descuentos por categoría')
+            ->assertSee('switchVisualTab')
+            ->assertSee('tab-content-logo')
+            ->assertSee('tab-content-banners')
+            ->assertSee('tab-content-promos');
+
+        // 2. Admin Dashboard: verify vertical admin sidebar and sector census chart bars
+        $dashboardResponse = $this->actingAs($admin)->get('/admin/dashboard');
+        $dashboardResponse->assertStatus(200)
+            ->assertSee('Barra 1: % de Empresas Registradas')
+            ->assertSee('Barra 2: % del Dinero Facturado')
+            ->assertSee('aria-label="Barra lateral de administración"', false)
+            ->assertSee('Ver Vitrina')
+            ->assertSee('Notificaciones');
+
+        // 3. Sales Report: verify back button to dashboard
+        $salesReportResponse = $this->actingAs($admin)->get('/admin/sales-report-print');
+        $salesReportResponse->assertStatus(200)
+            ->assertSee('Volver al Dashboard');
+
+        // 4. Admin Notifications: verify rendering in admin layout
+        $notificationsResponse = $this->actingAs($admin)->get('/admin/notifications');
+        $notificationsResponse->assertStatus(200)
+            ->assertSee('Panel de Notificaciones y Alertas')
+            ->assertSee('aria-label="Barra lateral de administración"', false);
+    }
 }
 
