@@ -1,0 +1,24 @@
+{
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "npm run css:build && npm run copy:public-to-dist",
+        "css:build": "tailwindcss -i ./resources/css/app.css -o ./public/assets/css/app.css --minify",
+        "css:watch": "tailwindcss -i ./resources/css/app.css -o ./public/assets/css/app.css --watch",
+        "copy:public-to-dist": "rm -rf dist && cp -r public dist"
+    },
+    "devDependencies": {
+        "@tailwindcss/cli": "^4.2.4",
+        "autoprefixer": "^10.5.0",
+        "axios": "^1.7.4",
+        "laravel-vite-plugin": "^1.0",
+        "postcss": "^8.5.13",
+        "tailwindcss": "^4.2.4",
+        "vite": "^5.0"
+    },
+    "dependencies": {
+        "alpinejs": "^3.17.2",
+        "chart.js": "^4.5.1"
+    }
+}

@@ -1,0 +1,51 @@
+services:
+  app:
+    build: .
+    ports: ["8000:80"]
+    env_file: .env
+    environment:
+      DB_HOST: db
+      REDIS_HOST: redis
+      QUEUE_CONNECTION: redis
+    depends_on: [db, redis]
+    volumes:
+      - storage:/var/www/html/storage/app
+
+  # Worker de colas: Wompi events, Factus, Envia, Resend (reintentos con backoff, failed_jobs)
+  queue:
+    build: .
+    command: php artisan queue:work --tries=5 --backoff=30 --sleep=3 --max-time=3600
+    env_file: .env
+    environment:
+      DB_HOST: db
+      REDIS_HOST: redis
+      QUEUE_CONNECTION: redis
+    depends_on: [db, redis]
+    restart: unless-stopped
+    volumes:
+      - storage:/var/www/html/storage/app
+
+  # Scheduler: expira reservas de stock sin pago cada 5 min
+  scheduler:
+    build: .
+    command: php artisan schedule:work
+    env_file: .env
+    environment:
+      DB_HOST: db
+      REDIS_HOST: redis
+    depends_on: [db]
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: fusashop
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+    volumes: [dbdata:/var/lib/mysql]
+
+  redis:
+    image: redis:7-alpine
+
+volumes:
+  dbdata:
+  storage:

@@ -1,0 +1,10 @@
+.git
+node_modules
+vendor
+storage/*
+public/storage
+dist
+*.log
+.env
+.env.local
+.env.*.local
