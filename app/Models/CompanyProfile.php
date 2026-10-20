@@ -44,4 +44,15 @@ class CompanyProfile extends Model
     {
         return $this->belongsTo(User::class, 'merchant_id')->withTrashed();
     }
+
+    public function logoUrl(): ?string
+    {
+        if (!$this->logo_path) {
+            return null;
+        }
+        if (str_starts_with($this->logo_path, 'http://') || str_starts_with($this->logo_path, 'https://')) {
+            return $this->logo_path;
+        }
+        return asset('storage/' . ltrim($this->logo_path, '/'));
+    }
 }

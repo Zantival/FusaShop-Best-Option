@@ -17,18 +17,45 @@
   @else
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
       @foreach($products as $p)
-      <div class="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all group">
+      <div class="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all group border border-slate-100">
         <div class="aspect-square overflow-hidden relative">
           <x-product-image :product="$p" class="w-full h-full group-hover:scale-[0.85] transition-transform duration-300"/>
           @if(!$p->is_active)<div class="absolute inset-0 bg-black/40 flex items-center justify-center"><span class="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">Inactivo</span></div>@endif
-          @if($p->stock === 0)<span class="absolute top-2 left-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-lg">Agotado</span>
-          @elseif($p->stock <= 5)<span class="absolute top-2 left-2 bg-amber-500 text-white text-xs font-bold px-2 py-1 rounded-lg">Poco stock</span>@endif
+          <div class="absolute top-2 left-2 flex flex-col gap-1 items-start">
+            @if($p->hasDiscount())
+              <span class="bg-[#ba1a1a] text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-sm">-{{ $p->discount_percent }}% OFF</span>
+            @endif
+            @if($p->stock === 0)
+              <span class="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg">Agotado</span>
+            @elseif($p->stock <= 5)
+              <span class="bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg">Poco stock</span>
+            @endif
+          </div>
+          @if($p->allows_points)
+            <span class="absolute top-2 right-2 bg-amber-500/95 text-white text-[9px] font-black px-2 py-0.5 rounded-lg shadow-sm flex items-center gap-0.5" title="Acepta redención de FusaCoins">
+              <span class="material-symbols-outlined text-[11px]">toll</span> FusaCoins
+            </span>
+          @endif
         </div>
         <div class="p-3">
-          <span class="text-xs text-[#3c4a41]">{{ $p->category }}</span>
+          <div class="flex items-center justify-between gap-1">
+            <span class="text-xs text-[#3c4a41]">{{ $p->category }}</span>
+            @if($p->allows_points)
+              <span class="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">Aplica FusaCoins</span>
+            @else
+              <span class="text-[9px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">Sin FusaCoins</span>
+            @endif
+          </div>
           <h3 class="font-['Manrope'] font-bold text-[#1b1c1c] text-sm truncate mt-0.5">{{ e($p->name) }}</h3>
-          <div class="flex items-center justify-between mt-1.5">
-            <span class="font-bold" style="color:#006c47">${{ number_format($p->price,0,',','.') }}</span>
+          <div class="flex items-end justify-between mt-1.5">
+            <div>
+              @if($p->hasDiscount())
+                <span class="text-[10px] text-slate-400 line-through block leading-none">${{ number_format($p->originalPrice(),0,',','.') }}</span>
+                <span class="font-black text-sm text-[#006c47]">${{ number_format($p->effectivePrice(),0,',','.') }}</span>
+              @else
+                <span class="font-bold text-sm" style="color:#006c47">${{ number_format($p->price,0,',','.') }}</span>
+              @endif
+            </div>
             <span class="text-xs text-[#3c4a41]">Stock: <strong class="{{ $p->stock==0?'text-red-600':($p->stock<=5?'text-amber-600':'') }}">{{ $p->stock }}</strong></span>
           </div>
           <div class="flex gap-1.5 mt-3">

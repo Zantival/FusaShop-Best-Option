@@ -57,16 +57,34 @@
         </div>
       </section>
 
+      @if(!empty($selectedItemIds))
+        @foreach($selectedItemIds as $sId)
+          <input type="hidden" name="selected_items[]" value="{{ $sId }}">
+        @endforeach
+      @endif
+
       <p class="text-xs text-on-surface-variant flex items-center gap-1">
         <span class="material-symbols-outlined text-sm">lock</span>
         Pagarás en el checkout seguro de Wompi (tarjeta, PSE, Nequi). FusaShop no almacena datos de tu tarjeta.
       </p>
 
       @if($availablePoints > 0)
-      <label class="flex items-center justify-between p-4 bg-surface-container rounded-2xl cursor-pointer">
-        <span class="text-sm"><strong>Usar mis {{ number_format($availablePoints,0,',','.') }} puntos</strong><br>
-          <span class="text-on-surface-variant">Descuento de hasta ${{ number_format($availablePoints * 50, 0, ',', '.') }}</span></span>
-        <input type="checkbox" name="use_points" id="use-points-check" value="1" {{ old('use_points') ? 'checked' : '' }}>
+      <label class="flex items-center justify-between p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl cursor-pointer">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-600 flex items-center justify-center shrink-0">
+            <span class="material-symbols-outlined">toll</span>
+          </div>
+          <div>
+            <span class="text-sm font-bold text-on-surface">Usar mis {{ number_format($availablePoints,0,',','.') }} FusaCoins</span>
+            <p class="text-xs text-on-surface-variant">
+              @php
+                $potentialDiscount = min($availablePoints * 100, $eligibleSubtotal, 50000);
+              @endphp
+              Descuento disponible: ${{ number_format($potentialDiscount, 0, ',', '.') }} COP (1 FusaCoin = $100 COP, máx $50.000 COP)
+            </p>
+          </div>
+        </div>
+        <input type="checkbox" name="use_points" id="use-points-check" value="1" {{ old('use_points', $usePoints ?? false) ? 'checked' : '' }} class="w-5 h-5 text-primary rounded-lg focus:ring-primary">
       </label>
       @endif
 
@@ -86,16 +104,34 @@
             <div class="w-16 h-16 rounded-xl overflow-hidden shrink-0"><x-product-image :product="$item->product" class="w-full h-full"/></div>
             <div class="flex-1">
               <p class="font-semibold text-on-background text-sm">{{ e($item->product->name) }}</p>
-              <p class="text-on-surface-variant text-xs">Cantidad: {{ $item->quantity }}</p>
+              <div class="flex flex-wrap items-center gap-2 text-xs text-on-surface-variant mt-0.5">
+                <span>Cantidad: {{ $item->quantity }}</span>
+                @if($item->product->hasDiscount())
+                  <span class="px-1.5 py-0.5 rounded bg-red-50 text-[#ba1a1a] font-black text-[10px]">-{{ $item->product->discount_percent }}% OFF</span>
+                @endif
+                @if($item->product->allows_points)
+                  <span class="inline-flex items-center gap-0.5 text-[10px] text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded">
+                    <span class="material-symbols-outlined text-[11px]">toll</span> FusaCoins
+                  </span>
+                @endif
+              </div>
             </div>
-            <span class="font-bold text-on-background">${{ number_format($item->quantity*$item->product->price,0,',','.') }}</span>
+            <div class="text-right">
+              @if($item->product->hasDiscount())
+                <span class="text-[10px] text-slate-400 line-through block">${{ number_format($item->quantity*$item->product->originalPrice(),0,',','.') }}</span>
+              @endif
+              <span class="font-bold text-on-background">${{ number_format($item->quantity*$item->product->effectivePrice(),0,',','.') }}</span>
+            </div>
           </div>
           @endforeach
         </div>
         <div class="border-t border-outline-variant/30 pt-4 space-y-2 text-sm">
           <div class="flex justify-between"><span>Subtotal</span><span>${{ number_format($cart->total(),0,',','.') }}</span></div>
           <div class="flex justify-between"><span>Envío</span><span id="ship-line">—</span></div>
-          <div class="flex justify-between text-primary" id="disc-row" style="display:none"><span>Descuento puntos</span><span id="disc-line"></span></div>
+          <div class="flex justify-between text-amber-700 font-medium" id="disc-row" style="display:none">
+            <span class="flex items-center gap-1"><span class="material-symbols-outlined text-sm">toll</span> Descuento FusaCoins</span>
+            <span id="disc-line"></span>
+          </div>
           <div class="flex justify-between font-bold text-xl text-on-background pt-2"><span>Total a pagar</span>
             <span class="text-primary" id="final-total">${{ number_format($cart->total(),0,',','.') }}</span></div>
         </div>
@@ -110,6 +146,11 @@
   var fmt = function (n) { return '$' + Math.round(n).toLocaleString('es-CO'); };
   var subtotal = {{ (float) $cart->total() }};
   var points = {{ (int) $availablePoints }};
+  var eligibleSubtotal = {{ (float) $eligibleSubtotal }};
+  var pointValue = 100;
+  var maxPointsDiscount = 50000;
+  var selectedItemIds = @json($selectedItemIds ?? []);
+
   var ratesBox = document.getElementById('rates');
   var rateInput = document.getElementById('shipping-rate-input');
   var payBtn = document.getElementById('pay-btn');
@@ -118,12 +159,12 @@
   var selected = null;
 
   function recompute() {
-    var discount = (usePts && usePts.checked) ? Math.min(points * 50, subtotal) : 0;
+    var discount = (usePts && usePts.checked) ? Math.min(points * pointValue, eligibleSubtotal, maxPointsDiscount) : 0;
     var ship = selected ? selected.price : 0;
     document.getElementById('ship-line').textContent = selected ? fmt(ship) : '—';
     document.getElementById('disc-row').style.display = discount ? 'flex' : 'none';
     document.getElementById('disc-line').textContent = '-' + fmt(discount);
-    var total = subtotal - discount + ship;
+    var total = Math.max(0, subtotal - discount) + ship;
     document.getElementById('final-total').textContent = fmt(total);
     payBtn.disabled = !selected;
     payLabel.textContent = selected ? 'Pagar ' + fmt(total) + ' con Wompi' : 'Selecciona un envío';
@@ -151,10 +192,18 @@
     if (!checked) return;
     ratesBox.textContent = 'Cotizando envío…'; selected = null; recompute();
     try {
+      var payload = { address_id: checked.value };
+      if (selectedItemIds && selectedItemIds.length) {
+        payload.selected_items = selectedItemIds;
+      }
       var res = await fetch(@json(route('consumer.checkout.quote')), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
-        body: JSON.stringify({ address_id: checked.value })
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+        },
+        body: JSON.stringify(payload)
       });
       var data = await res.json();
       if (!res.ok) { ratesBox.textContent = data.message || 'No se pudo cotizar.'; return; }

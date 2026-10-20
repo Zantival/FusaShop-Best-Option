@@ -41,14 +41,16 @@ class GenerateEnviaShipment implements ShouldQueue
                 return;
             }
             $fresh->update([
-                'tracking_number' => $result['tracking_number'],
-                'label_url' => $result['label_url'],
-                'tracking_url' => $result['tracking_url'],
+                'tracking_number'  => $result['tracking_number'],
+                'label_url'        => $result['label_url'],
+                'tracking_url'     => $result['tracking_url'],
                 'shipping_carrier' => $result['carrier'],
-                'tracking_status' => 'label_created',
-                'packed_at' => $fresh->packed_at ?? now(),
+                'tracking_status'  => 'label_created',
+                'packed_at'        => $fresh->packed_at ?? now(),
             ]);
         });
+
+        SendOrderShippedEmail::dispatch($order->id);
 
         IntegrationLog::success('envia', 'ship.generate', $order->id, $result['payload'], $result['raw']);
     }

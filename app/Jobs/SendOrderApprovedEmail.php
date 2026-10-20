@@ -26,8 +26,37 @@ class SendOrderApprovedEmail implements ShouldQueue
 
     public function handle(): void
     {
-        $order = Order::with('items.product', 'user')->findOrFail($this->orderId);
-        Mail::to($order->user->email)->send(new OrderApprovedMail($order));
-        IntegrationLog::success('resend', 'mail.order_approved', $order->id, ['to' => $order->user->email]);
+        $order = Order::with('items.product.merchant', 'user')->findOrFail($this->orderId);
+        $recipients = [];
+
+        // 1. Consumidor (Cliente)
+        if ($order->user?->email) {
+            Mail::to($order->user->email)->send(new OrderApprovedMail($order, 'consumer', $order->user->name));
+            $recipients[] = $order->user->email;
+        }
+
+        // 2. Vendedor(es) / Comerciante(s) del pedido
+        $merchants = $order->items
+            ->map(fn ($item) => $item->product?->merchant)
+            ->filter(fn ($m) => $m && !empty($m->email))
+            ->unique('id');
+
+        foreach ($merchants as $merchant) {
+            if (!in_array($merchant->email, $recipients, true)) {
+                Mail::to($merchant->email)->send(new OrderApprovedMail($order, 'merchant', $merchant->name));
+                $recipients[] = $merchant->email;
+            }
+        }
+
+        // 3. E-commerce / Administración
+        $admins = \App\Models\User::where('role', 'analyst')->whereNotNull('email')->get();
+        foreach ($admins as $admin) {
+            if (!in_array($admin->email, $recipients, true)) {
+                Mail::to($admin->email)->send(new OrderApprovedMail($order, 'admin', $admin->name));
+                $recipients[] = $admin->email;
+            }
+        }
+
+        IntegrationLog::success('resend', 'mail.order_approved', $order->id, ['to' => $recipients]);
     }
 }

@@ -43,6 +43,7 @@ class CheckoutFlowTest extends TestCase
             'services.envia.token' => 'envia_token',
             'services.envia.webhook_secret' => 'envia_hook',
             'services.factus.client_id' => 'id',
+            'services.factus.username' => 'testuser',
             'services.factus.numbering_range_id' => 8,
             'services.fusashop.mcp_token' => 'mcp_secret',
         ]);
@@ -266,7 +267,7 @@ class CheckoutFlowTest extends TestCase
         $this->assertSame('112000.00', (string) $order->total);
         $this->assertTrue($order->stock_reserved);
         $this->assertSame(2, $this->product->fresh()->reserved_stock);
-        $this->assertSame(0, $cart->items()->count());
+        $this->assertSame(1, $cart->items()->count(), 'El carrito se conserva hasta que el pago sea aprobado');
 
         $expected = hash('sha256', $order->reference . '11200000' . 'COP' . 'integrity_secret');
         $response->assertRedirect();
@@ -340,6 +341,55 @@ class CheckoutFlowTest extends TestCase
 
         $this->actingAs($this->consumer)->get(route('consumer.orders.invoice', [$order->id, 'pdf']))->assertOk();
         $this->actingAs($stranger)->get(route('consumer.orders.invoice', [$order->id, 'pdf']))->assertNotFound();
+
+        // El comerciante vendedor y el administrador del e-commerce también pueden descargar la factura electrónica DIAN
+        $this->withoutMiddleware(\App\Http\Middleware\EnsureKycApproved::class);
+        $merchant = User::where('role', 'merchant')->first();
+        $admin = User::where('role', 'analyst')->first();
+        $this->actingAs($merchant)->get(route('merchant.orders.invoice', [$order->id, 'pdf']))->assertOk();
+        $this->actingAs($admin)->get(route('analyst.orders.invoice', [$order->id, 'pdf']))->assertOk();
+    }
+
+    public function test_factus_invoice_email_is_sent_to_consumer_merchant_and_ecommerce_admin(): void
+    {
+        $this->fakeExternalApis();
+        $order = $this->makeOrder(qty: 2);
+
+        $this->postJson('/api/webhooks/wompi', $this->wompiEvent($order, 'APPROVED'))->assertOk();
+
+        Mail::assertSent(OrderApprovedMail::class, fn ($m) => $m->hasTo('j@t.co'));
+        Mail::assertSent(OrderApprovedMail::class, fn ($m) => $m->hasTo('m@t.co'));
+        Mail::assertSent(OrderApprovedMail::class, fn ($m) => $m->hasTo('a@t.co'));
+    }
+
+    public function test_wompi_sandbox_simulator_and_google_oauth_sandbox_work_without_api_keys(): void
+    {
+        config([
+            'services.wompi.public_key' => '',
+            'services.envia.token'      => '',
+            'services.factus.client_id' => '',
+            'services.google.client_id' => '',
+        ]);
+        $order = $this->makeOrder(qty: 1);
+        $wompi = app(\App\Services\WompiService::class);
+
+        $checkoutUrl = $wompi->checkoutUrl($order, route('consumer.checkout.result'));
+        $this->assertStringContainsString('/payment/wompi-sandbox', $checkoutUrl);
+
+        $sig = $wompi->integritySignature($order->reference, $order->totalInCents(), 'COP');
+        $this->actingAs($this->consumer)->post(route('wompi.sandbox.complete'), [
+            'reference'       => $order->reference,
+            'amount_in_cents' => $order->totalInCents(),
+            'currency'        => 'COP',
+            'signature'       => $sig,
+            'redirect_url'    => route('consumer.checkout.result'),
+            'status'          => 'APPROVED',
+        ])->assertRedirect();
+
+        $order->refresh();
+        $this->assertSame('paid', $order->payment_status);
+        $this->assertNotNull($order->tracking_number, 'Envia sandbox debe generar guía automáticamente sin token');
+        $this->assertNotNull($order->invoice_cufe, 'Factus sandbox debe emitir CUFE y factura automáticamente sin llaves');
     }
 
     public function test_mcp_requires_token_and_serves_order_lookup(): void

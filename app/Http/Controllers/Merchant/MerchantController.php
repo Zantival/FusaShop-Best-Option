@@ -3,13 +3,15 @@
 namespace App\Http\Controllers\Merchant;
 
 use App\Http\Controllers\Controller;
-use App\Models\{Product, Order, OrderItem, CompanyProfile, Review, BannerRequest};
+use App\Models\{Product, Order, OrderItem, CompanyProfile, Review, BannerRequest, Message, User};
 use App\Notifications\OrderStatusChanged;
+use App\Services\Admin\SalesDiagnosisService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class MerchantController extends Controller
 {
@@ -55,6 +57,32 @@ class MerchantController extends Controller
         $recentReviews  = Review::whereIn('product_id', $productIds)->with('user','product')->latest()->take(5)->get();
         $avgRating      = round((float) (Review::whereIn('product_id', $productIds)->avg('rating') ?? 5.0), 1);
         $totalReviews   = Review::whereIn('product_id', $productIds)->count();
+
+        // Productos del comerciante para pestaña de catálogo & stock
+        $products = $merchant->products()->latest()->get();
+
+        // Datos de ventas diarias para el gráfico Chart.js (últimos 7 días)
+        $dailySales = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $day = now()->subDays($i);
+            $dayKey = $day->toDateString();
+            $dayLabel = $day->isoFormat('ddd D');
+            $salesVal = (float) (OrderItem::whereIn('product_id', $productIds)
+                ->whereDate('created_at', $dayKey)
+                ->selectRaw('SUM(quantity * price) as total')
+                ->value('total') ?? 0);
+            $dailySales[] = [
+                'label' => $dayLabel,
+                'sales' => $salesVal,
+            ];
+        }
+
+        // Distribución por categoría
+        $categoryDistribution = Product::where('merchant_id', $merchant->id)
+            ->select('category', DB::raw('count(*) as count'))
+            ->groupBy('category')
+            ->pluck('count', 'category')
+            ->toArray();
 
         // Diagnóstico & Feedback IA (Supervisado por Inteligencia Antigravity / Analista)
         $aiDiagnostics = [
@@ -105,7 +133,8 @@ class MerchantController extends Controller
             'totalProducts','outOfStock','lowStock','totalSales','monthlySales',
             'pendingOrders','totalOrdersCount','deliveredOrders','fulfillmentRate',
             'netIncome','readyToWithdraw','recentOrders',
-            'recentReviews','avgRating','totalReviews','aiDiagnostics','academyCourses'
+            'recentReviews','avgRating','totalReviews','aiDiagnostics','academyCourses',
+            'products','dailySales','categoryDistribution'
         ));
     }
 
@@ -272,16 +301,19 @@ class MerchantController extends Controller
         }
 
         $data = $request->validate([
-            'name'        => 'required|string|max:255',
-            'description' => 'nullable|string|max:2000',
-            'price'       => 'required|numeric|min:0',
-            'stock'       => 'required|integer|min:0',
-            'category'    => 'required|string|max:100',
-            'image'       => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
-            'gallery.*'   => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
-            'is_active'   => 'boolean',
-            'options'     => 'nullable|array',
-            'specs'       => 'nullable|array',
+            'name'             => 'required|string|max:255',
+            'description'      => 'nullable|string|max:2000',
+            'price'            => 'required|numeric|min:0',
+            'has_discount'     => 'nullable|boolean',
+            'discount_percent' => 'nullable|integer|min:0|max:90',
+            'stock'            => 'required|integer|min:0',
+            'category'         => 'required|string|max:100',
+            'image'            => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+            'gallery.*'        => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+            'is_active'        => 'boolean',
+            'allows_points'    => 'nullable|boolean',
+            'options'          => 'nullable|array',
+            'specs'            => 'nullable|array',
         ]);
 
         $imagePath = null;
@@ -331,11 +363,17 @@ class MerchantController extends Controller
             }
         }
 
+        $hasDiscount = $request->has('has_discount')
+            ? $request->boolean('has_discount')
+            : ((int) ($data['discount_percent'] ?? 0) > 0);
+        $discountPercent = $hasDiscount ? min(90, max(0, (int) ($data['discount_percent'] ?? 0))) : 0;
+
         Auth::user()->products()->create([
             'name'              => strip_tags($data['name']),
             'slug'              => Str::slug($data['name']) . '-' . uniqid(),
             'description'       => strip_tags($data['description'] ?? ''),
             'price'             => $data['price'],
+            'discount_percent'  => $discountPercent,
             'stock'             => $data['stock'],
             'category'          => strip_tags($data['category']),
             'image'             => $imagePath,
@@ -343,6 +381,7 @@ class MerchantController extends Controller
             'available_options' => $availableOptions,
             'specifications'    => $request->specs,
             'is_active'         => $request->boolean('is_active', true),
+            'allows_points'     => $request->boolean('allows_points', true),
         ]);
 
         return redirect()->route('merchant.products')->with('success', 'Producto creado exitosamente.');
@@ -359,16 +398,19 @@ class MerchantController extends Controller
         if ($product->merchant_id !== Auth::id()) abort(403);
 
         $data = $request->validate([
-            'name'        => 'required|string|max:255',
-            'description' => 'nullable|string|max:2000',
-            'price'       => 'required|numeric|min:0',
-            'stock'       => 'required|integer|min:0',
-            'category'    => 'required|string|max:100',
-            'image'       => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
-            'gallery.*'   => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
-            'is_active'   => 'boolean',
-            'options'     => 'nullable|array',
-            'specs'       => 'nullable|array',
+            'name'             => 'required|string|max:255',
+            'description'      => 'nullable|string|max:2000',
+            'price'            => 'required|numeric|min:0',
+            'has_discount'     => 'nullable|boolean',
+            'discount_percent' => 'nullable|integer|min:0|max:90',
+            'stock'            => 'required|integer|min:0',
+            'category'         => 'required|string|max:100',
+            'image'            => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+            'gallery.*'        => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+            'is_active'        => 'boolean',
+            'allows_points'    => 'nullable|boolean',
+            'options'          => 'nullable|array',
+            'specs'            => 'nullable|array',
         ]);
 
         if ($request->hasFile('image')) {
@@ -428,10 +470,16 @@ class MerchantController extends Controller
             }
         }
 
+        $hasDiscount = $request->has('has_discount')
+            ? $request->boolean('has_discount')
+            : ((int) ($data['discount_percent'] ?? $product->discount_percent ?? 0) > 0);
+        $discountPercent = $hasDiscount ? min(90, max(0, (int) ($data['discount_percent'] ?? $product->discount_percent ?? 0))) : 0;
+
         $product->update([
             'name'              => strip_tags($data['name']),
             'description'       => strip_tags($data['description'] ?? ''),
             'price'             => $data['price'],
+            'discount_percent'  => $discountPercent,
             'stock'             => $data['stock'],
             'category'          => strip_tags($data['category']),
             'image'             => $data['image'] ?? $product->image,
@@ -439,6 +487,7 @@ class MerchantController extends Controller
             'available_options' => $availableOptions,
             'specifications'    => $request->specs,
             'is_active'         => $request->boolean('is_active', $product->is_active),
+            'allows_points'     => $request->boolean('allows_points', false),
         ]);
 
         return redirect()->route('merchant.products')->with('success', 'Producto actualizado.');
@@ -452,12 +501,32 @@ class MerchantController extends Controller
         return back()->with('success', 'Producto eliminado.');
     }
 
-    public function orders()
+    public function orders(Request $request)
     {
+        Auth::user()->unreadNotifications
+            ->filter(fn($n) => in_array($n->data['type'] ?? '', ['new_order', 'order_cancelled'], true)
+                || in_array($n->type, [\App\Notifications\NewOrderNotification::class, \App\Notifications\OrderCancelledByBuyerNotification::class], true))
+            ->each->markAsRead();
+
         $productIds = Auth::user()->products()->pluck('id');
-        $orders = Order::whereHas('items', fn($q) => $q->whereIn('product_id', $productIds))
-                       ->with('user','items.product')->latest()->paginate(10);
-        return view('merchant.orders', compact('orders'));
+        $baseQuery = Order::whereHas('items', fn($q) => $q->whereIn('product_id', $productIds));
+
+        $statusCounts = [
+            'all'        => (clone $baseQuery)->count(),
+            'pending'    => (clone $baseQuery)->where('status', 'pending')->count(),
+            'processing' => (clone $baseQuery)->where('status', 'processing')->count(),
+            'shipped'    => (clone $baseQuery)->where('status', 'shipped')->count(),
+            'delivered'  => (clone $baseQuery)->where('status', 'delivered')->count(),
+            'cancelled'  => (clone $baseQuery)->where('status', 'cancelled')->count(),
+        ];
+
+        $statusFilter = $request->query('status');
+        if ($statusFilter && in_array($statusFilter, ['pending', 'processing', 'shipped', 'delivered', 'cancelled'], true)) {
+            $baseQuery->where('status', $statusFilter);
+        }
+
+        $orders = $baseQuery->with('user', 'items.product')->latest()->paginate(10)->withQueryString();
+        return view('merchant.orders', compact('orders', 'statusCounts', 'statusFilter'));
     }
 
     public function orderUpdate(Request $request, Order $order)
@@ -567,8 +636,92 @@ class MerchantController extends Controller
         return redirect()->away($order->label_url);
     }
 
+    /** Rastreo en vivo de Envia.com para el comerciante */
+    public function orderTracking(Order $order, \App\Services\EnviaService $envia)
+    {
+        $productIds = Auth::user()->products()->pluck('id');
+        $owns = $order->items()->whereIn('product_id', $productIds)->exists();
+        abort_unless($owns, 403);
+
+        if (!$order->tracking_number) {
+            return response()->json([
+                'order_id' => $order->id,
+                'tracking_number' => null,
+                'status' => 'processing',
+                'status_label' => 'En empaque y preparación en la tienda local',
+                'step' => 1,
+                'events' => [
+                    [
+                        'status' => 'Pago confirmado exitosamente',
+                        'description' => 'El comercio está preparando el paquete para entrega a Envia.com',
+                        'date' => $order->created_at->format('d/m/Y'),
+                        'time' => $order->created_at->format('h:i A'),
+                        'location' => 'Fusagasugá',
+                    ]
+                ],
+                'message' => 'El pedido está pagado y el comercio está alistando los productos para Envia.com.'
+            ]);
+        }
+
+        try {
+            $t = $envia->track($order->tracking_number);
+            if (!empty($t['status']) && $t['status'] !== $order->tracking_status) {
+                $order->update(['tracking_status' => $t['status']]);
+            }
+            return response()->json([
+                'order_id' => $order->id,
+                'tracking_number' => $order->tracking_number,
+                'carrier' => strtoupper($order->shipping_carrier ?: 'Envia.com'),
+                'status' => $t['status'] ?? $order->tracking_status,
+                'status_label' => $t['status_label'] ?? 'En tránsito hacia el cliente',
+                'step' => $t['step'] ?? ($order->status === 'delivered' ? 5 : 3),
+                'url' => $order->tracking_url,
+                'destination' => $order->shipping_address,
+                'events' => $t['events'] ?? [],
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'order_id' => $order->id,
+                'tracking_number' => $order->tracking_number,
+                'carrier' => strtoupper($order->shipping_carrier ?: 'Envia.com'),
+                'status' => $order->tracking_status ?? 'in_transit',
+                'status_label' => 'En despacho con Envia.com',
+                'step' => 3,
+                'url' => $order->tracking_url,
+                'destination' => $order->shipping_address,
+                'events' => [
+                    [
+                        'status' => 'Guía emitida con Envia.com (' . strtoupper($order->shipping_carrier ?: 'Envia') . ')',
+                        'description' => 'En despacho y trazabilidad activa',
+                        'date' => $order->created_at->format('d/m/Y'),
+                        'time' => $order->created_at->format('h:i A'),
+                        'location' => 'Fusagasugá',
+                    ]
+                ],
+            ]);
+        }
+    }
+
+    /** Descarga de Factura Electrónica DIAN (Factus PDF / XML) para el comerciante vendedor */
+    public function orderInvoice(Order $order, string $format)
+    {
+        abort_unless(in_array($format, ['pdf', 'xml'], true), 404);
+        $productIds = Auth::user()->products()->pluck('id');
+        $owns = $order->items()->whereIn('product_id', $productIds)->exists();
+        abort_unless($owns, 403);
+
+        $path = $format === 'pdf' ? $order->invoice_pdf_path : $order->invoice_xml_path;
+        abort_unless($path && Storage::disk('local')->exists($path), 404, 'La factura electrónica aún no está disponible.');
+
+        return Storage::disk('local')->download($path, "factura-{$order->invoice_number}.{$format}");
+    }
+
     public function reviews()
     {
+        Auth::user()->unreadNotifications
+            ->filter(fn($n) => $n->type === \App\Notifications\NewProductReview::class)
+            ->each->markAsRead();
+
         $productIds = Auth::user()->products()->pluck('id');
         $reviews = Review::whereIn('product_id', $productIds)
                          ->with('user', 'product')
@@ -596,37 +749,131 @@ class MerchantController extends Controller
 
     public function bannerRequest()
     {
-        return view('merchant.request-banner');
+        $merchant = Auth::user();
+        $products = $merchant->products()
+            ->where('is_active', true)
+            ->orderByDesc('discount_percent')
+            ->orderBy('name')
+            ->get();
+        $discountedProducts = $products->filter(fn($p) => $p->hasDiscount())->values();
+        $bannerFee = \App\Models\Setting::bannerFee();
+        $storeUrl = route('consumer.merchant.profile', $merchant->id);
+        $myRequests = \App\Models\BannerRequest::where('user_id', $merchant->id)->latest()->take(6)->get();
+
+        return view('merchant.request-banner', compact('products', 'discountedProducts', 'bannerFee', 'storeUrl', 'merchant', 'myRequests'));
     }
 
-    public function bannerRequestStore(Request $request)
+    public function bannerRequestStore(Request $request, \App\Services\WompiService $wompi, \App\Services\OrderPaymentService $payments)
     {
-        $request->validate([
-            'image' => 'required|file|mimes:jpg,jpeg,png,webp,mp4,webm,mov|max:10240',
-            'notes' => 'nullable|string|max:1000'
+        $paymentMode = $request->input('payment_mode', 'wompi_card');
+        $targetType = $request->input('target_type', 'store');
+
+        $rules = [
+            'image'         => 'required|file|mimes:jpg,jpeg,png,webp,mp4,webm,mov|max:10240',
+            'title'         => 'nullable|string|max:150',
+            'description'   => 'required|string|max:1500',
+            'target_type'   => 'required|in:store,products,promo_card',
+            'product_ids'   => in_array($targetType, ['products', 'promo_card'], true) ? 'required|array|min:1' : 'nullable|array',
+            'product_ids.*' => 'integer|exists:products,id',
+            'payment_mode'  => 'nullable|in:wompi_card,wompi_checkout',
+        ];
+
+        if ($paymentMode !== 'wompi_checkout') {
+            $rules['card_number'] = 'required|string|min:13|max:24';
+            $rules['card_expiry'] = 'required|string|max:7';
+            $rules['card_cvc']    = 'required|string|min:3|max:4';
+        }
+
+        $request->validate($rules, [
+            'image.required'       => 'Debes adjuntar la foto o arte publicitario.',
+            'description.required' => 'Por favor indica la descripción e instrucciones para el analista.',
+            'product_ids.required' => 'Debes seleccionar al menos un producto para vincular a la promoción.',
+            'product_ids.min'      => 'Selecciona al menos un producto de tu catálogo.',
+            'card_number.required' => 'Ingresa el número de tarjeta para el pago seguro en línea con Wompi.',
+            'card_expiry.required' => 'Ingresa la fecha de vencimiento (MM/AA).',
+            'card_cvc.required'    => 'Ingresa el código de seguridad (CVC).',
         ]);
 
+        $merchant = Auth::user();
         $imagePath = $request->file('image')->store('banners/requests', 'public');
-        $paymentPath = 'paid_online_' . time(); // Pago en línea simulado
+        $paymentRef = 'FS-BANNER-' . strtoupper(substr(md5(uniqid()), 0, 10));
+
+        $selectedProductsData = [];
+        $targetUrl = route('consumer.merchant.profile', $merchant->id);
+
+        if (in_array($targetType, ['products', 'promo_card'], true) && !empty($request->product_ids)) {
+            $selectedProducts = $merchant->products()
+                ->whereIn('id', $request->product_ids)
+                ->get();
+
+            foreach ($selectedProducts as $p) {
+                $selectedProductsData[] = [
+                    'id'               => $p->id,
+                    'name'             => $p->name,
+                    'category'         => $p->category,
+                    'original_price'   => (float) $p->price,
+                    'price'            => (float) $p->effectivePrice(),
+                    'discount_percent' => (int) ($p->discount_percent ?? 0),
+                    'url'              => route('consumer.product', $p->id),
+                    'image'            => $p->image_url ?? null,
+                ];
+            }
+
+            if (count($selectedProductsData) === 1) {
+                $targetUrl = $selectedProductsData[0]['url'];
+            } elseif (count($selectedProductsData) > 1) {
+                $idsList = implode(',', array_column($selectedProductsData, 'id'));
+                $targetUrl = route('consumer.catalog', ['products' => $idsList]);
+            }
+        }
+
+        $cost = (float) \App\Models\Setting::bannerFee();
+        $cents = (int) round($cost * 100);
+        $signature = $wompi->integritySignature($paymentRef, $cents, 'COP');
 
         $bannerRequest = \App\Models\BannerRequest::create([
-            'user_id' => Auth::id(),
-            'image_path' => $imagePath,
-            'payment_proof_path' => $paymentPath,
-            'notes' => strip_tags($request->notes),
-            'status' => 'pending'
+            'user_id'            => $merchant->id,
+            'title'              => strip_tags($request->input('title', '')),
+            'image_path'         => $imagePath,
+            'payment_proof_path' => $paymentRef,
+            'target_type'        => $targetType,
+            'selected_products'  => $selectedProductsData,
+            'target_url'         => $targetUrl,
+            'notes'              => strip_tags($request->input('description')),
+            'cost'               => $cost,
+            'status'             => 'pending',
         ]);
 
         $analysts = \App\Models\User::where('role', 'analyst')->get();
-        foreach($analysts as $analyst) {
+        foreach ($analysts as $analyst) {
             $analyst->notify(new \App\Notifications\BannerRequestNotification($bannerRequest));
         }
 
-        return redirect()->route('merchant.store.edit')->with('success', 'Solicitud de banner enviada y pagada correctamente.');
+        if ($paymentMode === 'wompi_checkout') {
+            return redirect()->away($wompi->bannerCheckoutUrl($bannerRequest, $paymentRef, route('merchant.dashboard')));
+        }
+
+        // Registrar y conciliar el pago con firma de integridad SHA-256 de Wompi
+        $txId = 'wompi_banner_' . strtolower(substr(md5($paymentRef . microtime(true)), 0, 14));
+        $payments->handleTransaction([
+            'id'              => $txId,
+            'status'          => 'APPROVED',
+            'reference'       => $paymentRef,
+            'amount_in_cents' => $cents,
+            'currency'        => 'COP',
+            'signature'       => $signature,
+        ]);
+
+        $adLabel = $targetType === 'promo_card' ? 'Tarjeta Promocional de Productos' : 'Banner Publicitario';
+        return redirect()->route('merchant.dashboard')->with('success', "¡{$adLabel} solicitada y pagada exitosamente vía Wompi ({$paymentRef})! El analista vinculará y publicará tu promoción en la vitrina principal.");
     }
 
     public function inventory()
     {
+        Auth::user()->unreadNotifications
+            ->filter(fn($n) => $n->type === \App\Notifications\OutOfStockNotification::class)
+            ->each->markAsRead();
+
         $products = Auth::user()->products()->orderBy('name')->get();
         return view('merchant.inventory', compact('products'));
     }
@@ -691,12 +938,231 @@ class MerchantController extends Controller
         ));
     }
 
-    public function contactSupport()
+    public function contactSupport(\Illuminate\Http\Request $request)
     {
-        $admin = \App\Models\User::where('role', 'analyst')->first();
-        if (!$admin) {
-            return back()->with('error', 'No hay administradores disponibles en este momento.');
+        $analysts = User::where('role', 'analyst')->orderBy('id')->get();
+        if ($analysts->isEmpty()) {
+            return back()->with('error', 'No hay analistas de soporte disponibles en este momento.');
         }
-        return redirect()->route('chat.show', $admin->id);
+
+        $admin = $request->filled('analyst')
+            ? ($analysts->firstWhere('id', (int) $request->query('analyst')) ?? $analysts->first())
+            : $analysts->first();
+
+        $merchantId = Auth::id();
+
+        $messages = Message::where(function ($q) use ($merchantId, $admin) {
+            $q->where('sender_id', $merchantId)->where('receiver_id', $admin->id);
+        })->orWhere(function ($q) use ($merchantId, $admin) {
+            $q->where('sender_id', $admin->id)->where('receiver_id', $merchantId);
+        })
+        ->with('product')
+        ->orderBy('created_at', 'asc')
+        ->get();
+
+        // Marcar mensajes del analista como leídos
+        Message::where('sender_id', $admin->id)
+            ->where('receiver_id', $merchantId)
+            ->where('is_read', false)
+            ->update(['is_read' => true]);
+
+        Auth::user()?->unreadNotifications
+            ->filter(fn($n) => ($n->data['sender_id'] ?? null) == $admin->id)
+            ->each->markAsRead();
+
+        $badWords = Message::getBadWords();
+
+        return view('merchant.support', compact('admin', 'analysts', 'messages', 'badWords'));
+    }
+
+    public function messages(?int $otherUserId = null)
+    {
+        $merchantId = Auth::id();
+
+        // Si el usuario solicitado es un analista, redirigir al centro de Soporte Técnico con el Analista
+        if ($otherUserId) {
+            $requestedUser = User::find($otherUserId);
+            if ($requestedUser && $requestedUser->isAnalyst()) {
+                return redirect()->route('merchant.support.contact', ['analyst' => $requestedUser->id]);
+            }
+        }
+
+        // Obtener todos los mensajes con clientes (excluyendo conversaciones con analistas de soporte)
+        $analystIds = User::where('role', 'analyst')->pluck('id')->all();
+
+        $allMessages = Message::where(function ($q) use ($merchantId, $analystIds) {
+            $q->where('sender_id', $merchantId)
+              ->whereNotIn('receiver_id', $analystIds);
+        })->orWhere(function ($q) use ($merchantId, $analystIds) {
+            $q->where('receiver_id', $merchantId)
+              ->whereNotIn('sender_id', $analystIds);
+        })
+        ->with(['sender.companyProfile', 'receiver.companyProfile', 'product'])
+        ->latest()
+        ->get();
+
+        // Agrupar por el ID del otro usuario (cliente)
+        $conversations = $allMessages->groupBy(function ($msg) use ($merchantId) {
+            return $msg->sender_id == $merchantId ? $msg->receiver_id : $msg->sender_id;
+        });
+
+        // Determinar usuario activo en el chat
+        $activeUser = null;
+        $activeMessages = collect();
+        $activeProduct = null;
+        $customerOrders = collect();
+
+        if ($otherUserId) {
+            $activeUser = User::with('companyProfile')->findOrFail($otherUserId);
+        } elseif ($conversations->isNotEmpty()) {
+            $firstOtherUserId = $conversations->keys()->first();
+            $activeUser = User::with('companyProfile')->find($firstOtherUserId);
+        }
+
+        if ($activeUser) {
+            $activeMessages = Message::where(function ($q) use ($merchantId, $activeUser) {
+                $q->where('sender_id', $merchantId)->where('receiver_id', $activeUser->id);
+            })->orWhere(function ($q) use ($merchantId, $activeUser) {
+                $q->where('sender_id', $activeUser->id)->where('receiver_id', $merchantId);
+            })
+            ->with('product')
+            ->orderBy('created_at', 'asc')
+            ->get();
+
+            // Buscar si la conversación tiene un producto asociado
+            $lastProductMsg = $activeMessages->whereNotNull('product_id')->last();
+            if ($lastProductMsg && $lastProductMsg->product) {
+                $activeProduct = $lastProductMsg->product;
+            }
+
+            // Marcar mensajes del cliente como leídos
+            Message::where('sender_id', $activeUser->id)
+                ->where('receiver_id', $merchantId)
+                ->where('is_read', false)
+                ->update(['is_read' => true]);
+
+            // Marcar también notificaciones de mensaje de este remitente como leídas
+            Auth::user()->unreadNotifications
+                ->filter(fn($n) => ($n->data['sender_id'] ?? null) == $activeUser->id)
+                ->each->markAsRead();
+
+            // Pedidos recientes de este cliente con productos de este comerciante
+            $customerOrders = Order::where('user_id', $activeUser->id)
+                ->whereHas('items.product', fn($q) => $q->where('merchant_id', $merchantId))
+                ->latest()
+                ->take(3)
+                ->get();
+        }
+
+        $badWords = Message::getBadWords();
+        $unreadCount = Message::where('receiver_id', $merchantId)
+            ->whereNotIn('sender_id', $analystIds)
+            ->where('is_read', false)
+            ->count();
+
+        return view('merchant.messages', compact(
+            'conversations', 'activeUser', 'activeMessages', 'activeProduct', 'customerOrders', 'badWords', 'unreadCount'
+        ));
+    }
+
+    public function salesReports(SalesDiagnosisService $diagnosisService)
+    {
+        $merchant = Auth::user();
+
+        // 1. Historial de reportes enviados por el administrador
+        $adminReports = $merchant->notifications()
+            ->get()
+            ->filter(fn($n) => ($n->data['type'] ?? '') === 'merchant_sales_report')
+            ->values();
+
+        // Marcar reportes de ventas pendientes como leídos al abrir el centro de reportes
+        $merchant->unreadNotifications
+            ->filter(fn($n) => ($n->data['type'] ?? '') === 'merchant_sales_report')
+            ->each->markAsRead();
+
+        // 2. Diagnóstico y métricas en tiempo real
+        $liveReport = $diagnosisService->buildMerchantSalesReport($merchant);
+
+        // 3. Cantidad de órdenes procesadas
+        $ordersCount = Order::whereHas('items.product', fn($q) => $q->where('merchant_id', $merchant->id))
+            ->where('payment_status', 'paid')
+            ->count();
+
+        // 4. Reporte oficial más reciente
+        $latestReportNotification = $adminReports->first();
+
+        return view('merchant.reports', compact(
+            'merchant', 'adminReports', 'liveReport', 'ordersCount', 'latestReportNotification'
+        ));
+    }
+
+    public function exportSalesReportCsv(): StreamedResponse
+    {
+        $merchant = Auth::user();
+        $companyName = Str::slug($merchant->companyProfile->company_name ?? $merchant->name);
+        $fileName = "reporte_ventas_{$companyName}_" . date('Y-m-d') . ".csv";
+
+        $orderItems = OrderItem::whereHas('product', fn($q) => $q->where('merchant_id', $merchant->id))
+            ->with(['order.user', 'product'])
+            ->latest()
+            ->get();
+
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$fileName}\"",
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
+        ];
+
+        return response()->stream(function () use ($orderItems) {
+            $handle = fopen('php://output', 'w');
+            
+            // UTF-8 BOM para que Excel en Windows/Mac abra los caracteres con acentos sin problemas
+            fputs($handle, "\xEF\xBB\xBF");
+
+            // Encabezados
+            fputcsv($handle, [
+                'ID Pedido',
+                'Referencia',
+                'Fecha Pedido',
+                'Cliente',
+                'Email Cliente',
+                'Producto',
+                'SKU / Codigo',
+                'Cantidad',
+                'Precio Unitario (COP)',
+                'Subtotal (COP)',
+                'Estado Pedido',
+                'Estado Pago',
+                'Transportadora Envia.com',
+                'Numero de Guia',
+            ], ';');
+
+            foreach ($orderItems as $item) {
+                $order = $item->order;
+                $customer = $order?->user;
+                $product = $item->product;
+
+                fputcsv($handle, [
+                    $order?->id ?? 'N/A',
+                    $order?->reference ?? 'N/A',
+                    $order?->created_at?->format('d/m/Y H:i') ?? 'N/A',
+                    $customer?->name ?? 'Consumidor',
+                    $customer?->email ?? 'N/A',
+                    $product?->name ?? 'Producto',
+                    $product?->id ? 'PROD-' . $product->id : 'N/A',
+                    $item->quantity,
+                    number_format($item->price, 2, ',', '.'),
+                    number_format($item->quantity * $item->price, 2, ',', '.'),
+                    ucfirst($order?->status ?? 'N/A'),
+                    ucfirst($order?->payment_status ?? 'N/A'),
+                    ucfirst($order?->shipping_carrier ?? 'Envia.com'),
+                    $order?->tracking_number ?? 'Pendiente',
+                ], ';');
+            }
+
+            fclose($handle);
+        }, 200, $headers);
     }
 }

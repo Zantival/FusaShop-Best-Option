@@ -15,6 +15,7 @@ class User extends Authenticatable implements MustVerifyEmail
     protected $fillable = [
         'name', 'email', 'password', 'role', 'admin_subrole', 'phone', 'address', 'avatar',
         'is_blocked', 'blocked_reason', 'deleted_reason', 'last_seen_at', 'two_factor_enabled',
+        'email_verified_at', 'verification_code', 'verification_code_expires_at',
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -22,12 +23,46 @@ class User extends Authenticatable implements MustVerifyEmail
     protected function casts(): array
     {
         return [
-            'email_verified_at'  => 'datetime',
-            'last_seen_at'       => 'datetime',
-            'password'           => 'hashed',
-            'is_blocked'         => 'boolean',
-            'two_factor_enabled' => 'boolean',
+            'email_verified_at'             => 'datetime',
+            'verification_code_expires_at'  => 'datetime',
+            'last_seen_at'                  => 'datetime',
+            'password'                      => 'hashed',
+            'is_blocked'                    => 'boolean',
+            'two_factor_enabled'            => 'boolean',
         ];
+    }
+
+    public function generateVerificationCode(): string
+    {
+        $code = str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+        $this->update([
+            'verification_code' => $code,
+            'verification_code_expires_at' => now()->addMinutes(30),
+        ]);
+        return $code;
+    }
+
+    public function verifyCode(string $code): bool
+    {
+        if (empty($this->verification_code) || empty($code)) {
+            return false;
+        }
+
+        if ($this->verification_code_expires_at && $this->verification_code_expires_at->isPast()) {
+            return false;
+        }
+
+        if (trim($this->verification_code) !== trim($code)) {
+            return false;
+        }
+
+        $this->update([
+            'email_verified_at' => now(),
+            'verification_code' => null,
+            'verification_code_expires_at' => null,
+        ]);
+
+        return true;
     }
 
     // role: consumer | merchant | analyst
@@ -68,7 +103,7 @@ class User extends Authenticatable implements MustVerifyEmail
         if (str_starts_with($this->avatar, 'http://') || str_starts_with($this->avatar, 'https://')) {
             return $this->avatar;
         }
-        return url('/storage/' . ltrim($this->avatar, '/'));
+        return asset('storage/' . ltrim($this->avatar, '/'));
     }
 
     public function products() { return $this->hasMany(Product::class, 'merchant_id'); }

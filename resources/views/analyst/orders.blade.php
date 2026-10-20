@@ -8,7 +8,7 @@
       <table class="w-full">
         <thead class="bg-surface-container-low">
           <tr>
-            @foreach(['#','Cliente','Total','Estado','Pago','Fecha'] as $h)
+            @foreach(['#','Cliente','Total','Estado','Pago','Factura DIAN (Factus)','Fecha'] as $h)
             <th class="px-6 py-4 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider">{{ $h }}</th>
             @endforeach
           </tr>
@@ -28,6 +28,22 @@
             <td class="px-6 py-4 font-bold text-primary">${{ number_format($o->total,0,',','.') }}</td>
             <td class="px-6 py-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold {{ $sc[$o->status]??'' }}">{{ ucfirst($o->status) }}</span></td>
             <td class="px-6 py-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold {{ $pc[$o->payment_status]??'' }}">{{ ucfirst($o->payment_status) }}</span></td>
+            <td class="px-6 py-4 text-xs">
+              @if($o->invoice_pdf_path)
+                <div class="flex items-center gap-1.5">
+                  <a href="{{ route('analyst.orders.invoice', [$o->id, 'pdf']) }}" class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold hover:bg-emerald-100">
+                    PDF ({{ $o->invoice_number ?: 'DIAN' }})
+                  </a>
+                  @if($o->invoice_xml_path)
+                    <a href="{{ route('analyst.orders.invoice', [$o->id, 'xml']) }}" class="px-2 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 font-bold hover:bg-slate-200">
+                      XML
+                    </a>
+                  @endif
+                </div>
+              @else
+                <span class="text-on-surface-variant/60">Pendiente</span>
+              @endif
+            </td>
             <td class="px-6 py-4 text-sm text-on-surface-variant">{{ $o->created_at->format('d/m/Y') }}</td>
           </tr>
           @endforeach

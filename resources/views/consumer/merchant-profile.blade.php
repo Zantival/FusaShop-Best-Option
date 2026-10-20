@@ -73,10 +73,17 @@
       <!-- Info -->
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap mb-1">
-          <h1 class="text-2xl font-black text-on-surface">{{ e($profile->company_name) }}</h1>
-          <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-[#6efcb9]/20 text-primary text-[10px] font-black rounded-full uppercase tracking-wider">
-            <span class="material-symbols-outlined text-[12px]" style="font-variation-settings: 'FILL' 1">verified</span> Verificada
-          </span>
+          <h1 class="text-2xl font-black text-on-surface flex items-center gap-1.5">
+            <span>{{ e($profile->company_name) }}</span>
+            @if($profile->kyc_status === 'approved')
+              <span class="material-symbols-outlined text-[#006c47] text-[22px] shrink-0" style="font-variation-settings: 'FILL' 1" title="Comercio Verificado Oficialmente">verified</span>
+            @endif
+          </h1>
+          @if($profile->kyc_status === 'approved')
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-[#6efcb9]/20 text-primary text-[10px] font-black rounded-full uppercase tracking-wider">
+              <span class="material-symbols-outlined text-[12px]" style="font-variation-settings: 'FILL' 1">verified</span> Verificada
+            </span>
+          @endif
         </div>
         <p class="text-on-surface-variant text-sm leading-relaxed">{{ $profile->description ?: 'Empresa local de Fusagasugá comprometida con la calidad.' }}</p>
         @if($profile->address)
@@ -138,14 +145,32 @@
         <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
           @foreach($products as $p)
             <a href="{{ route('consumer.product', $p->id) }}"
-               class="bg-white rounded-2xl overflow-hidden shadow-sm border border-surface-container hover:shadow-md hover:-translate-y-0.5 transition-all group">
-              <div class="aspect-square overflow-hidden bg-surface-container-low">
+               class="bg-white rounded-2xl overflow-hidden shadow-sm border border-surface-container hover:shadow-md hover:-translate-y-0.5 transition-all group relative">
+              <div class="aspect-square overflow-hidden bg-surface-container-low relative">
                 <x-product-image :product="$p" class="w-full h-full object-cover group-hover:scale-[0.85] transition-transform duration-300"/>
+                @if($p->hasDiscount())
+                  <span class="absolute top-2.5 left-2.5 bg-[#ba1a1a] text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-sm">
+                    -{{ $p->discount_percent }}% OFF
+                  </span>
+                @endif
+                @if($p->allows_points ?? true)
+                  <span class="absolute bottom-2 left-2 bg-amber-500/95 text-white text-[9px] font-extrabold px-2 py-0.5 rounded-lg shadow-sm flex items-center gap-0.5">
+                    <span class="material-symbols-outlined text-[11px]">toll</span> Aplica FusaCoins
+                  </span>
+                @endif
               </div>
               <div class="p-4">
                 <p class="text-[9px] font-black text-primary uppercase tracking-wider mb-1">{{ $p->category }}</p>
                 <p class="font-bold text-sm text-on-surface line-clamp-2 leading-tight mb-2">{{ $p->name }}</p>
-                <p class="text-lg font-black text-primary">${{ number_format($p->price, 0, ',', '.') }}</p>
+                @if($p->hasDiscount())
+                  <div class="flex items-center gap-1.5 text-xs text-slate-400">
+                    <span>Antes: <span class="line-through">${{ number_format($p->originalPrice(), 0, ',', '.') }}</span></span>
+                    <span class="text-[10px] font-black text-[#ba1a1a] bg-red-50 px-1.5 py-0.5 rounded">-{{ $p->discount_percent }}%</span>
+                  </div>
+                  <p class="text-lg font-black text-primary">${{ number_format($p->effectivePrice(), 0, ',', '.') }} <span class="text-[10px] font-bold text-slate-400">COP</span></p>
+                @else
+                  <p class="text-lg font-black text-primary">${{ number_format($p->effectivePrice(), 0, ',', '.') }} <span class="text-[10px] font-bold text-slate-400">COP</span></p>
+                @endif
               </div>
             </a>
           @endforeach
@@ -157,85 +182,84 @@
     <!-- Sidebar: Map + Info -->
     <div class="space-y-6">
 
-      {{-- Dynamic Google Map with Directions --}}
-      @if($profile->latitude && $profile->longitude)
-        <div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-surface-container">
-          <div class="p-4 border-b border-surface-container flex items-center justify-between">
-            <h3 class="font-bold text-on-surface flex items-center gap-2">
-              <span class="material-symbols-outlined text-primary text-[20px]">location_on</span> Ubicación
-            </h3>
-            <span id="location-status" class="text-[9px] font-bold uppercase text-on-surface-variant flex items-center gap-1"></span>
-          </div>
-          
-          <div id="consumer-map" class="w-full aspect-video bg-surface-container-low"></div>
-          
-          <div class="p-4 space-y-4">
-            <div id="route-info" class="hidden animate-in fade-in duration-500">
-              <div class="flex items-center justify-between mb-3 p-3 bg-primary/5 rounded-xl border border-primary/10">
-                <div class="flex items-center gap-3">
-                  <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white">
-                    <span class="material-symbols-outlined text-sm">directions_car</span>
-                  </div>
-                  <div>
-                    <p class="text-[10px] font-bold text-primary uppercase leading-tight">Tiempo estimado</p>
-                    <p id="travel-time" class="text-sm font-black text-on-surface">-</p>
-                  </div>
+      {{-- Location & Interactive Map (Leaflet / OpenStreetMap) --}}
+      <div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-surface-container">
+        <div class="p-4 border-b border-surface-container flex items-center justify-between">
+          <h3 class="font-bold text-on-surface flex items-center gap-2">
+            <span class="material-symbols-outlined text-primary text-[20px]">location_on</span> Ubicación
+          </h3>
+          <span id="location-status" class="text-[9px] font-bold uppercase text-on-surface-variant flex items-center gap-1"></span>
+        </div>
+        
+        <div id="consumer-map" class="w-full aspect-video bg-surface-container-low"></div>
+        
+        <div class="p-4 space-y-4">
+          <div id="route-info" class="hidden animate-in fade-in duration-500">
+            <div class="flex items-center justify-between mb-3 p-3 bg-primary/5 rounded-xl border border-primary/10">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white">
+                  <span class="material-symbols-outlined text-sm">directions_car</span>
                 </div>
-                <div class="text-right">
-                  <p class="text-[10px] font-bold text-primary uppercase leading-tight">Distancia</p>
-                  <p id="travel-distance" class="text-sm font-black text-on-surface">-</p>
+                <div>
+                  <p class="text-[10px] font-bold text-primary uppercase leading-tight">Tiempo estimado</p>
+                  <p id="travel-time" class="text-sm font-black text-on-surface">-</p>
                 </div>
               </div>
+              <div class="text-right">
+                <p class="text-[10px] font-bold text-primary uppercase leading-tight">Distancia</p>
+                <p id="travel-distance" class="text-sm font-black text-on-surface">-</p>
+              </div>
             </div>
+          </div>
 
-            <div class="flex flex-col gap-2">
-              <button onclick="calculateRoute('DRIVING')" id="btn-route" 
-                      class="w-full py-3 bg-primary-gradient text-white font-bold rounded-2xl shadow-lg shadow-primary/20 hover:opacity-95 transition-all flex items-center justify-center gap-2 text-sm">
-                <span class="material-symbols-outlined text-[18px]">directions</span>
-                ¿Cómo llegar ahora?
+          <div class="flex flex-col gap-2">
+            <button onclick="calculateRoute('DRIVING')" id="btn-route" 
+                    class="w-full py-3 bg-primary-gradient text-white font-bold rounded-2xl shadow-lg shadow-primary/20 hover:opacity-95 transition-all flex items-center justify-center gap-2 text-sm">
+              <span class="material-symbols-outlined text-[18px]">directions</span>
+              ¿Cómo llegar ahora?
+            </button>
+            
+            <div id="travel-modes" class="hidden grid grid-cols-4 gap-1.5">
+              <button onclick="calculateRoute('DRIVING')" class="mode-btn active py-2 rounded-xl border-2 border-primary bg-primary/5 text-primary flex flex-col items-center justify-center transition-all hover:bg-primary/10" title="Carro" data-mode="DRIVING">
+                <span class="material-symbols-outlined text-[18px]">directions_car</span>
+                <span class="text-[9px] font-bold mt-0.5">Carro</span>
               </button>
-              
-              <div id="travel-modes" class="hidden grid grid-cols-3 gap-2">
-                <button onclick="calculateRoute('DRIVING')" class="mode-btn active py-2 rounded-xl border-2 border-primary bg-primary/5 text-primary flex items-center justify-center" title="Carro">
-                  <span class="material-symbols-outlined">directions_car</span>
-                </button>
-                <button onclick="calculateRoute('WALKING')" class="mode-btn py-2 rounded-xl border-2 border-surface-container text-on-surface-variant flex items-center justify-center" title="A pie">
-                  <span class="material-symbols-outlined">directions_walk</span>
-                </button>
-                <button onclick="calculateRoute('TRANSIT')" class="mode-btn py-2 rounded-xl border-2 border-surface-container text-on-surface-variant flex items-center justify-center" title="Transporte">
-                  <span class="material-symbols-outlined">directions_bus</span>
-                </button>
-              </div>
+              <button onclick="calculateRoute('MOTORCYCLE')" class="mode-btn py-2 rounded-xl border-2 border-surface-container text-on-surface-variant flex flex-col items-center justify-center transition-all hover:bg-surface-container-low" title="Moto" data-mode="MOTORCYCLE">
+                <span class="material-symbols-outlined text-[18px]">two_wheeler</span>
+                <span class="text-[9px] font-bold mt-0.5">Moto</span>
+              </button>
+              <button onclick="calculateRoute('CYCLING')" class="mode-btn py-2 rounded-xl border-2 border-surface-container text-on-surface-variant flex flex-col items-center justify-center transition-all hover:bg-surface-container-low" title="Bicicleta" data-mode="CYCLING">
+                <span class="material-symbols-outlined text-[18px]">directions_bike</span>
+                <span class="text-[9px] font-bold mt-0.5">Bici</span>
+              </button>
+              <button onclick="calculateRoute('WALKING')" class="mode-btn py-2 rounded-xl border-2 border-surface-container text-on-surface-variant flex flex-col items-center justify-center transition-all hover:bg-surface-container-low" title="A pie" data-mode="WALKING">
+                <span class="material-symbols-outlined text-[18px]">directions_walk</span>
+                <span class="text-[9px] font-bold mt-0.5">A pie</span>
+              </button>
+            </div>
 
-              <div class="grid grid-cols-2 gap-2 mt-1">
-                @if($profile->phone)
-                <a href="https://wa.me/57{{ ltrim($profile->phone, '+570') }}?text=Hola%2C%20vengo%20desde%20FusaShop.%20Me%20gustar%C3%ADa%20hacer%20una%20consulta." 
-                   target="_blank"
-                   class="w-full py-2.5 bg-[#25D366] text-white font-bold rounded-2xl hover:bg-[#1da851] transition-all flex items-center justify-center gap-2 text-xs shadow-sm">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.006c.106.005.249-.04.39.298.144.347.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.86s.274.072.376-.043c.101-.116.433-.506.549-.68.116-.173.231-.145.39-.087s1.011.477 1.184.564.289.13.332.202c.045.072.045.419-.1.824zm-3.423-14.416c-6.627 0-12 5.373-12 12s5.373 12 12 12 12-5.373 12-12-5.373-12-12-12zm.029 18.88c-1.161 0-2.305-.292-3.318-.844l-3.677.964.984-3.595c-.607-1.052-.927-2.246-.926-3.468.005-5.804 4.729-10.528 10.539-10.528 5.808 0 10.538 4.724 10.538 10.528.001 5.804-4.724 10.528-10.538 10.528z"/></svg>
-                  WhatsApp
-                </a>
-                @endif
-                <a href="https://www.google.com/maps/dir/?api=1&destination={{ $profile->latitude }},{{ $profile->longitude }}" 
-                   target="_blank"
-                   class="w-full py-2.5 border-2 border-surface-container text-on-surface-variant font-bold rounded-2xl hover:bg-surface-container-low transition-all flex items-center justify-center gap-2 text-xs">
-                  <span class="material-symbols-outlined text-[16px]">open_in_new</span>
-                  Maps App
-                </a>
-              </div>
+            <div class="grid grid-cols-2 gap-2 mt-1">
+              @if($profile->phone)
+              <a href="https://wa.me/57{{ ltrim($profile->phone, '+570') }}?text=Hola%2C%20vengo%20desde%20FusaShop.%20Me%20gustar%C3%ADa%20hacer%20una%20consulta." 
+                 target="_blank"
+                 class="w-full py-2.5 bg-[#25D366] text-white font-bold rounded-2xl hover:bg-[#1da851] transition-all flex items-center justify-center gap-2 text-xs shadow-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.006c.106.005.249-.04.39.298.144.347.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.86s.274.072.376-.043c.101-.116.433-.506.549-.68.116-.173.231-.145.39-.087s1.011.477 1.184.564.289.13.332.202c.045.072.045.419-.1.824zm-3.423-14.416c-6.627 0-12 5.373-12 12s5.373 12 12 12 12-5.373 12-12-5.373-12-12-12zm.029 18.88c-1.161 0-2.305-.292-3.318-.844l-3.677.964.984-3.595c-.607-1.052-.927-2.246-.926-3.468.005-5.804 4.729-10.528 10.539-10.528 5.808 0 10.538 4.724 10.538 10.528.001 5.804-4.724 10.528-10.538 10.528z"/></svg>
+                WhatsApp
+              </a>
+              @endif
+              <a id="btn-maps-app" href="https://www.google.com/maps/dir/?api=1&destination={{ $profile->latitude ?: '4.33646' }},{{ $profile->longitude ?: '-74.36378' }}" 
+                 target="_blank"
+                 class="w-full py-2.5 border-2 border-surface-container text-on-surface-variant font-bold rounded-2xl hover:bg-surface-container-low transition-all flex items-center justify-center gap-2 text-xs">
+                <span class="material-symbols-outlined text-[16px]">open_in_new</span>
+                Maps App
+              </a>
             </div>
           </div>
+          @if($profile->address)
+            <p class="text-xs text-on-surface-variant text-center border-t border-surface-container-low pt-2">{{ $profile->address }}</p>
+          @endif
         </div>
-      @elseif($profile->address)
-        <div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-surface-container">
-          <div class="aspect-video">
-            <iframe src="https://maps.google.com/maps?q={{ urlencode($profile->address . ', Fusagasugá, Colombia') }}&t=&z=15&ie=UTF8&iwloc=&output=embed" class="w-full h-full border-0"></iframe>
-          </div>
-          <div class="p-4">
-            <p class="text-xs text-on-surface-variant">{{ $profile->address }}</p>
-          </div>
-        </div>
-      @endif
+      </div>
 
       {{-- Contact Info --}}
       <div class="bg-white rounded-2xl p-5 shadow-sm border border-surface-container">
@@ -272,11 +296,12 @@
 @endif
 
 @push('styles')
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" /><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 @endpush
 
 @push('scripts')
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>if(typeof L==="undefined"){document.write('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>');}</script>
 <script>
 let currentSlide = 0;
 const slides = document.querySelectorAll('.carousel-slide');
@@ -296,50 +321,187 @@ function prevSlide() { showSlide(currentSlide - 1); }
 function goToSlide(n) { showSlide(n); }
 if (slides.length > 1) setInterval(nextSlide, 5000);
 
-// --- GEOLOCATION LOGIC (Leaflet + OpenStreetMap) ---
+// --- GEOLOCATION LOGIC (Leaflet + OpenStreetMap con Fallback Iframe 100% Confiable) ---
 let map, merchantMarker, routeLayer;
-const mLat = {{ $profile->latitude ?: 0 }};
-const mLng = {{ $profile->longitude ?: 0 }};
+const mLat = {{ $profile->latitude ?: 4.33646 }};
+const mLng = {{ $profile->longitude ?: -74.36378 }};
 
-function initStoreMap() {
+function initStoreMap(retries = 0) {
   const mapEl = document.getElementById('consumer-map');
-  if (!mapEl || mLat === 0 || mLng === 0) return;
+  if (!mapEl) return;
   
   if (typeof L === 'undefined') {
-    mapEl.innerHTML = '<div class="p-4 text-error font-bold text-center">No se pudo cargar el mapa.</div>';
+    if (retries < 25) {
+      setTimeout(() => initStoreMap(retries + 1), 120);
+      return;
+    }
+    // Fallback Infalible: Si Leaflet CDN no cargó, renderizar mapa nativo embebido OpenStreetMap en iframe
+    mapEl.innerHTML = `<iframe width="100%" height="100%" style="border:0; border-radius: 1rem; width:100%; height:100%; min-height: 220px;" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${mLng-0.008}%2C${mLat-0.008}%2C${mLng+0.008}%2C${mLat+0.008}&layer=mapnik&marker=${mLat}%2C${mLng}"></iframe>`;
     return;
   }
 
-  // Inicializar mapa
-  map = L.map('consumer-map', { zoomControl: false }).setView([mLat, mLng], 15);
-  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  try {
+    if (map) { map.remove(); }
+    map = L.map('consumer-map', { zoomControl: false }).setView([mLat, mLng], 15);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap'
-  }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
 
-  // Custom Icon
-  const customIcon = L.divIcon({
-    className: '',
-    html: '<div style="width:36px;height:36px;background:linear-gradient(135deg,#006c47,#00b67a);border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid white;box-shadow:0 4px 12px rgba(0,108,71,.4);"></div>',
-    iconSize: [36, 36],
-    iconAnchor: [18, 36],
-  });
+    // Custom Icon
+    const customIcon = L.divIcon({
+      className: '',
+      html: '<div style="width:36px;height:36px;background:linear-gradient(135deg,#006c47,#00b67a);border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid white;box-shadow:0 4px 12px rgba(0,108,71,.4);"></div>',
+      iconSize: [36, 36],
+      iconAnchor: [18, 36],
+    });
 
-  merchantMarker = L.marker([mLat, mLng], { icon: customIcon }).addTo(map)
-    .bindPopup('<b>{{ e($profile->company_name) }}</b>').openPopup();
+    merchantMarker = L.marker([mLat, mLng], { icon: customIcon }).addTo(map)
+      .bindPopup('<b>{{ e($profile->company_name) }}</b>').openPopup();
 
-  setTimeout(function() { map.invalidateSize(); }, 200);
+    setTimeout(function() { if (map) map.invalidateSize(); }, 300);
+  } catch (err) {
+    console.warn('Error inicializando Leaflet, usando fallback iframe:', err);
+    mapEl.innerHTML = `<iframe width="100%" height="100%" style="border:0; border-radius: 1rem; width:100%; height:100%; min-height: 220px;" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${mLng-0.008}%2C${mLat-0.008}%2C${mLng+0.008}%2C${mLat+0.008}&layer=mapnik&marker=${mLat}%2C${mLng}"></iframe>`;
+  }
 }
 
-function calculateRoute(mode = 'driving') {
+let userCoords = null;
+let currentTravelMode = 'DRIVING';
+let cachedRoute = null;
+
+function formatMinutes(totalMins) {
+  if (totalMins < 60) return `${totalMins} min`;
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function getModeMeta(mode) {
+  switch(mode) {
+    case 'MOTORCYCLE':
+      return { 
+        icon: 'two_wheeler', 
+        label: 'Moto', 
+        color: '#0284c7', 
+        gmapsMode: 'two-wheeler',
+        calcMinutes: (km, osrmSecs) => Math.max(1, Math.round((km / 35) * 60))
+      };
+    case 'CYCLING':
+      return { 
+        icon: 'directions_bike', 
+        label: 'Bici', 
+        color: '#10b981', 
+        gmapsMode: 'bicycling',
+        calcMinutes: (km, osrmSecs) => Math.max(2, Math.round((km / 15) * 60))
+      };
+    case 'WALKING':
+      return { 
+        icon: 'directions_walk', 
+        label: 'A pie', 
+        color: '#f97316', 
+        gmapsMode: 'walking',
+        calcMinutes: (km, osrmSecs) => Math.max(2, Math.round((km / 4.5) * 60))
+      };
+    case 'DRIVING':
+    default:
+      return { 
+        icon: 'directions_car', 
+        label: 'Carro', 
+        color: '#006c47', 
+        gmapsMode: 'driving',
+        calcMinutes: (km, osrmSecs) => {
+          if (osrmSecs && osrmSecs > 30) return Math.max(2, Math.round(osrmSecs / 60));
+          return Math.max(2, Math.round((km / 25) * 60));
+        }
+      };
+  }
+}
+
+function updateActiveModeButton(mode) {
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    const isThisMode = b.dataset.mode === mode;
+    b.classList.toggle('active', isThisMode);
+    b.classList.toggle('border-primary', isThisMode);
+    b.classList.toggle('bg-primary/5', isThisMode);
+    b.classList.toggle('text-primary', isThisMode);
+    b.classList.toggle('border-surface-container', !isThisMode);
+    b.classList.toggle('text-on-surface-variant', !isThisMode);
+  });
+}
+
+function processAndRenderRoute(route, mode, uLat, uLng) {
+  cachedRoute = route;
+  currentTravelMode = mode;
+  const meta = getModeMeta(mode);
+  const distanceKm = route.distance / 1000;
+  const estimatedMins = meta.calcMinutes(distanceKm, route.duration);
+
+  // Actualizar capa de la ruta en el mapa con el color correspondiente
+  if (routeLayer) map.removeLayer(routeLayer);
+  routeLayer = L.geoJSON(route.geometry, {
+    style: { 
+      color: meta.color, 
+      weight: 6, 
+      opacity: 0.85 
+    }
+  }).addTo(map);
+
+  map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+
+  // Marcador de usuario
+  if (!window.userMapMarker) {
+    window.userMapMarker = L.circleMarker([uLat, uLng], {
+      radius: 8, fillColor: '#3b82f6', color: '#fff', weight: 3, opacity: 1, fillOpacity: 1
+    }).addTo(map).bindPopup("Tu ubicación");
+  } else {
+    window.userMapMarker.setLatLng([uLat, uLng]);
+  }
+
+  // Actualizar textos e iconos de la UI
+  document.getElementById('route-info').classList.remove('hidden');
+  document.getElementById('travel-modes').classList.remove('hidden');
+  document.getElementById('btn-route').classList.add('hidden');
+
+  const iconEl = document.querySelector('#route-info .material-symbols-outlined');
+  if (iconEl) iconEl.textContent = meta.icon;
+
+  document.getElementById('travel-time').innerText = formatMinutes(estimatedMins);
+  document.getElementById('travel-distance').innerText = distanceKm < 1 ? Math.round(route.distance) + ' m' : distanceKm.toFixed(1) + ' km';
+  
+  const status = document.getElementById('location-status');
+  if (status) status.innerHTML = `<span class="text-primary font-bold">Ruta en ${meta.label}</span>`;
+
+  // Actualizar enlace externo a Google Maps
+  const mapsLink = document.getElementById('btn-maps-app');
+  if (mapsLink) {
+    mapsLink.href = `https://www.google.com/maps/dir/?api=1&origin=${uLat},${uLng}&destination=${mLat},${mLng}&travelmode=${meta.gmapsMode}`;
+  }
+
+  updateActiveModeButton(mode);
+}
+
+function calculateRoute(mode = 'DRIVING') {
+  // Si ya tenemos la ruta trazada y coordenadas, cambiar de modo al instante sin recargar ni esperar
+  if (cachedRoute && userCoords) {
+    processAndRenderRoute(cachedRoute, mode, userCoords.lat, userCoords.lng);
+    return;
+  }
+
   const btn = document.getElementById('btn-route');
   const status = document.getElementById('location-status');
-  
+
+  // Si ya tenemos GPS pero no ruta aún
+  if (userCoords) {
+    fetchRouteData(userCoords.lat, userCoords.lng, mode);
+    return;
+  }
+
   btn.disabled = true;
   btn.innerHTML = '<span class="material-symbols-outlined animate-spin text-[18px]">sync</span> Obteniendo ubicación...';
-  status.innerHTML = '<span class="animate-pulse">Buscando GPS...</span>';
+  if (status) status.innerHTML = '<span class="animate-pulse">Buscando GPS...</span>';
 
   if (!navigator.geolocation) {
     alert("Tu navegador no soporta geolocalización.");
@@ -349,86 +511,46 @@ function calculateRoute(mode = 'driving') {
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
-      const uLat = position.coords.latitude;
-      const uLng = position.coords.longitude;
-
-      // OSRM Public API for routing (Free)
-      // profiles: driving, walking, cycling
-      let osrmProfile = 'driving';
-      if (mode === 'WALKING') osrmProfile = 'foot';
-      
-      const url = `https://router.project-osrm.org/route/v1/${osrmProfile}/${uLng},${uLat};${mLng},${mLat}?overview=full&geometries=geojson`;
-
-      fetch(url)
-        .then(response => response.json())
-        .then(data => {
-          resetBtn();
-          if (data.code === 'Ok' && data.routes.length > 0) {
-            const route = data.routes[0];
-            
-            // Draw route on map
-            if (routeLayer) map.removeLayer(routeLayer);
-            
-            routeLayer = L.geoJSON(route.geometry, {
-              style: { color: '#006c47', weight: 6, opacity: 0.8 }
-            }).addTo(map);
-
-            // Fit bounds to show entire route
-            map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
-
-            // User marker
-            L.circleMarker([uLat, uLng], {
-              radius: 8, fillColor: '#3b82f6', color: '#fff', weight: 3, opacity: 1, fillOpacity: 1
-            }).addTo(map).bindPopup("Tu ubicación");
-
-            // UI Updates
-            document.getElementById('route-info').classList.remove('hidden');
-            document.getElementById('travel-modes').classList.remove('hidden');
-            document.getElementById('btn-route').classList.add('hidden');
-            
-            // Convert seconds to mins/hours
-            let mins = Math.round(route.duration / 60);
-            let timeTxt = mins < 60 ? mins + ' min' : Math.floor(mins/60) + 'h ' + (mins%60) + 'm';
-            
-            // Convert meters to km
-            let distTxt = (route.distance / 1000).toFixed(1) + ' km';
-
-            document.getElementById('travel-time').innerText = timeTxt;
-            document.getElementById('travel-distance').innerText = distTxt;
-            status.innerHTML = '<span class="text-primary">Ruta trazada</span>';
-
-            // Update active button
-            document.querySelectorAll('.mode-btn').forEach(b => {
-               b.classList.remove('active', 'border-primary', 'bg-primary/5', 'text-primary');
-               b.classList.add('border-surface-container', 'text-on-surface-variant');
-               
-               // Re-add active class to the button matching the selected mode
-               if (b.getAttribute('onclick').includes(mode)) {
-                 b.classList.add('active', 'border-primary', 'bg-primary/5', 'text-primary');
-                 b.classList.remove('border-surface-container', 'text-on-surface-variant');
-               }
-            });
-          } else {
-            alert("No se pudo calcular la ruta desde tu ubicación.");
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          resetBtn();
-          alert("Error interno al calcular la ruta.");
-        });
+      userCoords = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      };
+      fetchRouteData(userCoords.lat, userCoords.lng, mode);
     },
     (error) => {
       resetBtn();
-      status.innerText = "";
+      if (status) status.innerText = "";
       switch(error.code) {
-        case error.PERMISSION_DENIED: alert("Por favor activa los permisos de ubicación."); break;
+        case error.PERMISSION_DENIED: alert("Por favor activa los permisos de ubicación en tu navegador."); break;
         case error.POSITION_UNAVAILABLE: alert("Ubicación no disponible."); break;
         case error.TIMEOUT: alert("Tiempo de espera agotado."); break;
       }
     },
-    { enableHighAccuracy: true }
+    { enableHighAccuracy: true, timeout: 10000 }
   );
+}
+
+function fetchRouteData(uLat, uLng, mode) {
+  const status = document.getElementById('location-status');
+  if (status) status.innerHTML = '<span class="animate-pulse">Trazando ruta...</span>';
+
+  const url = `https://router.project-osrm.org/route/v1/driving/${uLng},${uLat};${mLng},${mLat}?overview=full&geometries=geojson`;
+
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      resetBtn();
+      if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+        processAndRenderRoute(data.routes[0], mode, uLat, uLng);
+      } else {
+        alert("No se pudo calcular la ruta desde tu ubicación actual.");
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      resetBtn();
+      alert("Error al conectar con el servicio de mapas.");
+    });
 }
 
 function resetBtn() {

@@ -12,9 +12,21 @@ use App\Http\Controllers\Analyst\AnalystController;
 |--------------------------------------------------------------------------
 */
 
-// Página de inicio con banners publicitarios
-Route::get('/', fn() => redirect()->route('consumer.home'));
+// Página de inicio con redirección inteligente según rol
+Route::get('/', function () {
+    if (auth()->check()) {
+        if (auth()->user()->isMerchant()) {
+            return redirect()->route('merchant.dashboard');
+        }
+        if (auth()->user()->isAnalyst()) {
+            return redirect()->route('analyst.dashboard');
+        }
+    }
+    return redirect()->route('consumer.home');
+});
 Route::get('/privacidad', fn() => view('privacy'))->name('privacy');
+Route::get('/terminos', fn() => view('terms'))->name('terms');
+Route::get('/tarifas', fn() => view('fees'))->name('fees');
 Route::post('/cookie-consent', function(\Illuminate\Http\Request $request) {
     $consent = $request->input('consent', true);
     session(['cookie_consent' => $consent]);
@@ -36,6 +48,10 @@ Route::middleware('guest')->group(function () {
 
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout')->middleware('auth');
 
+// --- Verificación de Correo (Código OTP 6 dígitos) ---
+Route::post('/email/verify-code', [\App\Http\Controllers\Auth\AuthController::class, 'verifyEmailCode'])->middleware(['auth', 'throttle:10,1'])->name('verification.verify-code');
+Route::post('/email/resend-code', [\App\Http\Controllers\Auth\AuthController::class, 'resendVerificationCode'])->middleware(['auth', 'throttle:6,1'])->name('verification.resend-code');
+
 // --- Verificación de Correo ---
 Route::get('/email/verify', function () {
     return view('auth.verify-email');
@@ -54,13 +70,15 @@ Route::post('/email/verification-notification', function (\Illuminate\Http\Reque
 })->middleware(['auth', 'throttle:6,1'])->name('verification.send');
 
 
-// --- Notificaciones (Compartido para todos los usuarios autenticados) ---
+// --- Notificaciones y Pasarela Sandbox (Compartido para todos los usuarios autenticados) ---
 Route::middleware('auth')->group(function () {
+    Route::get('/payment/wompi-sandbox', [\App\Http\Controllers\WompiSandboxController::class, 'show'])->name('wompi.sandbox.checkout');
+    Route::post('/payment/wompi-sandbox', [\App\Http\Controllers\WompiSandboxController::class, 'complete'])->name('wompi.sandbox.complete');
     Route::get('/notifications', function (\Illuminate\Http\Request $request) {
         if ($request->wantsJson() || $request->has('json')) {
             return response()->json([
                 'unread' => auth()->user()->unreadNotifications->count(),
-                'notifications' => auth()->user()->notifications()->take(10)->get()
+                'notifications' => auth()->user()->unreadNotifications()->take(10)->get()
             ]);
         }
         if (auth()->check() && auth()->user()->isAnalyst()) {
@@ -68,6 +86,102 @@ Route::middleware('auth')->group(function () {
         }
         return view('notifications.index');
     })->name('notifications.index');
+
+    Route::get('/notifications/{id}/open', function ($id) {
+        $user = auth()->user();
+        $notification = $user->notifications()->findOrFail($id);
+        if (is_null($notification->read_at)) {
+            $notification->markAsRead();
+        }
+
+        $data = $notification->data ?? [];
+        $type = $data['type'] ?? '';
+
+        if ($type === 'merchant_sales_report') {
+            $user->unreadNotifications
+                ->filter(fn($n) => ($n->data['type'] ?? '') === 'merchant_sales_report')
+                ->each->markAsRead();
+            $targetUrl = $data['url'] ?? route('merchant.sales-report.show', ['user' => $user->id]);
+            if (!str_contains($targetUrl, 'notification_id=')) {
+                $targetUrl .= (str_contains($targetUrl, '?') ? '&' : '?') . 'notification_id=' . $notification->id;
+            }
+            return redirect()->to($targetUrl);
+        }
+
+        if (isset($data['sender_id']) || $notification->type === \App\Notifications\NewMessageNotification::class) {
+            $senderId = $data['sender_id'] ?? null;
+            if ($senderId) {
+                \App\Models\Message::where('sender_id', $senderId)
+                    ->where('receiver_id', $user->id)
+                    ->where('is_read', false)
+                    ->update(['is_read' => true]);
+
+                $user->unreadNotifications
+                    ->filter(fn($n) => ($n->data['sender_id'] ?? null) == $senderId)
+                    ->each->markAsRead();
+
+                if ($user->isMerchant()) {
+                    $senderUser = \App\Models\User::find($senderId);
+                    if ($senderUser && $senderUser->isAnalyst()) {
+                        return redirect()->route('merchant.support.contact', ['analyst' => $senderId]);
+                    }
+                    return redirect()->route('merchant.messages', $senderId);
+                }
+
+                return redirect()->route('chat.show', $senderId);
+            }
+            return $user->isMerchant()
+                ? redirect()->route('merchant.messages')
+                : redirect()->route('chat.index');
+        }
+
+        if ($type === 'banner_request' && isset($data['request_id'])) {
+            return redirect()->route('analyst.banner-requests.show', $data['request_id']);
+        }
+
+        if ($type === 'new_merchant_kyc') {
+            return redirect()->route('analyst.users', ['kyc_status' => 'pending']);
+        }
+
+        if ($type === 'kyc_decision') {
+            return ($data['status'] ?? '') === 'approved'
+                ? redirect()->route('merchant.dashboard')
+                : redirect()->route('merchant.profile');
+        }
+
+        if (isset($data['pqrs_id'])) {
+            return $user->isAnalyst()
+                ? redirect()->route('analyst.pqrs.index')
+                : redirect()->route('pqrs.show', $data['pqrs_id']);
+        }
+
+        if (isset($data['order_id']) || $type === 'new_order' || $type === 'order_cancelled') {
+            if ($user->isMerchant()) {
+                return $type === 'order_cancelled'
+                    ? redirect()->route('merchant.orders', ['status' => 'cancelled'])
+                    : redirect()->route('merchant.orders');
+            }
+            if ($user->isAnalyst()) {
+                return redirect()->route('analyst.orders');
+            }
+            return redirect()->route('consumer.orders');
+        }
+
+        if (isset($data['product_id'])) {
+            if ($user->isMerchant()) {
+                return $notification->type === \App\Notifications\NewProductReview::class
+                    ? redirect()->route('merchant.reviews')
+                    : redirect()->route('merchant.inventory');
+            }
+            return redirect()->route('consumer.product', $data['product_id']);
+        }
+
+        if (!empty($data['url'])) {
+            return redirect()->to($data['url']);
+        }
+
+        return redirect()->route('notifications.index');
+    })->name('notifications.open');
     
     Route::post('/notifications/{id}/read', function ($id) {
         $notification = auth()->user()->notifications()->findOrFail($id);
@@ -84,8 +198,9 @@ Route::middleware('auth')->group(function () {
     })->name('notifications.readAll');
 
     // Perfil Personal (Avatar, Nombre, etc.) - Universal
-    Route::get('/account/profile', [ConsumerController::class, 'profile'])->name('account.profile');
-    Route::put('/account/profile', [ConsumerController::class, 'updateProfile'])->name('account.profile.update');
+    Route::get('/account/profile',      [ConsumerController::class, 'profile'])->name('account.profile');
+    Route::get('/account/profile/edit', [ConsumerController::class, 'editProfile'])->name('account.profile.edit');
+    Route::put('/account/profile',      [ConsumerController::class, 'updateProfile'])->name('account.profile.update');
 
     // Chat
     Route::get('/chat', [\App\Http\Controllers\ChatController::class, 'index'])->name('chat.index');
@@ -120,6 +235,7 @@ Route::prefix('shop')->name('consumer.')->group(function () {
     // Rutas protegidas para Clientes
     Route::middleware(['auth', 'verified', 'role:consumer'])->group(function () {
         Route::get('/cart',                [ConsumerController::class, 'cartIndex'])->name('cart');
+        Route::post('/cart/select',         [ConsumerController::class, 'cartSelect'])->name('cart.select');
         Route::post('/cart/add',           [ConsumerController::class, 'cartAdd'])->name('cart.add');
         Route::patch('/cart/item/{item}',  [ConsumerController::class, 'cartUpdate'])->name('cart.update');
         Route::delete('/cart/item/{item}', [ConsumerController::class, 'cartRemove'])->name('cart.remove');
@@ -134,6 +250,7 @@ Route::prefix('shop')->name('consumer.')->group(function () {
         Route::put('/addresses/{id}',      [\App\Http\Controllers\Consumer\AddressController::class, 'update'])->name('addresses.update');
         Route::delete('/addresses/{id}',   [\App\Http\Controllers\Consumer\AddressController::class, 'destroy'])->name('addresses.destroy');
         Route::get('/orders',              [ConsumerController::class, 'orders'])->name('orders');
+        Route::patch('/orders/{order}/cancel', [ConsumerController::class, 'cancelOrder'])->name('orders.cancel');
         Route::get('/orders/{id}/receipt', [ConsumerController::class, 'receipt'])->name('orders.receipt');
         Route::post('/product/{id}/review', [ConsumerController::class, 'productReview'])->name('product.review');
     });
@@ -161,11 +278,16 @@ Route::middleware(['auth', 'verified', 'role:merchant'])->prefix('merchant')->na
         Route::patch('/orders/{order}/status', [MerchantController::class, 'orderUpdate'])->name('orders.update');
         Route::post('/orders/{order}/generate-label', [MerchantController::class, 'generateLabel'])->name('orders.generate-label');
         Route::get('/orders/{order}/label',           [MerchantController::class, 'printLabel'])->name('orders.label');
+        Route::get('/orders/{order}/tracking',        [MerchantController::class, 'orderTracking'])->name('orders.tracking');
+        Route::get('/orders/{order}/invoice/{format}',[MerchantController::class, 'orderInvoice'])->name('orders.invoice');
         Route::get('/reviews',                 [MerchantController::class, 'reviews'])->name('reviews');
         Route::post('/reviews/{review}/reply', [MerchantController::class, 'replyToReview'])->name('reviews.reply');
         Route::get('/finances',                [MerchantController::class, 'finances'])->name('finances');
         Route::get('/banner-request',          [MerchantController::class, 'bannerRequest'])->name('banner.request');
         Route::post('/banner-request',         [MerchantController::class, 'bannerRequestStore'])->name('banner.request.store');
+        Route::get('/messages/{user?}',        [MerchantController::class, 'messages'])->name('messages');
+        Route::get('/reports',                 [MerchantController::class, 'salesReports'])->name('reports');
+        Route::get('/reports/export-csv',      [MerchantController::class, 'exportSalesReportCsv'])->name('reports.export-csv');
     });
 });
 
@@ -174,6 +296,7 @@ Route::middleware(['auth', 'role:analyst'])->prefix('admin')->name('analyst.')->
     Route::get('/dashboard',                      [AnalystController::class, 'dashboard'])->name('dashboard');
     Route::get('/search',                         [AnalystController::class, 'globalSearch'])->name('search');
     Route::post('/settings',                      [AnalystController::class, 'updateSettings'])->name('settings.update');
+    Route::post('/how-to-start-guide',            [AnalystController::class, 'updateHowToStartGuide'])->name('how-to-start.update');
     Route::get('/audit-logs',                     [AnalystController::class, 'auditLogs'])->name('audit-logs');
     Route::get('/notifications',                  fn() => view('notifications.index'))->name('notifications');
 
@@ -185,12 +308,14 @@ Route::middleware(['auth', 'role:analyst'])->prefix('admin')->name('analyst.')->
     Route::delete('/users/{user}',                [AnalystController::class, 'userDelete'])->name('users.delete');
     Route::post('/users/{id}/restore',            [AnalystController::class, 'userRestore'])->name('users.restore');
     Route::patch('/users/{user}/toggle-block',    [AnalystController::class, 'userToggleBlock'])->name('users.toggle-block');
+    Route::patch('/users/{user}/toggle-verification', [AnalystController::class, 'userToggleVerification'])->name('users.toggle-verification');
     Route::get('/users/{user}/rut',               [AnalystController::class, 'userRut'])->name('users.rut');
     Route::post('/users/{user}/kyc',              [AnalystController::class, 'updateKyc'])->name('users.kyc');
     Route::post('/users/{user}/sector',           [AnalystController::class, 'updateMerchantSector'])->name('users.sector');
 
     Route::get('/orders',                         [AnalystController::class, 'orders'])->name('orders');
     Route::get('/orders/export',                  [AnalystController::class, 'ordersExportCsv'])->name('orders.export');
+    Route::get('/orders/{order}/invoice/{format}',[AnalystController::class, 'orderInvoice'])->name('orders.invoice');
     Route::get('/payments',                       [AnalystController::class, 'payments'])->name('payments');
 
     Route::get('/integrations',                   [\App\Http\Controllers\Analyst\IntegrationController::class, 'index'])->name('integrations');

@@ -7,9 +7,9 @@ use Illuminate\Database\Eloquent\Model;
 class Product extends Model
 {
     protected $fillable = [
-        'merchant_id', 'name', 'slug', 'description', 'price', 'stock',
+        'merchant_id', 'name', 'slug', 'description', 'price', 'discount_percent', 'stock',
         'category', 'type', 'sector_key', 'subsector_key', 'views_count',
-        'image', 'available_options', 'images', 'is_active', 'specifications',
+        'image', 'available_options', 'images', 'is_active', 'allows_points', 'specifications',
         'reserved_stock', 'low_stock_threshold', 'weight_grams', 'length_cm', 'width_cm', 'height_cm', 'is_taxed',
     ];
 
@@ -17,7 +17,9 @@ class Product extends Model
     {
         return [
             'price' => 'decimal:2',
+            'discount_percent' => 'integer',
             'is_active' => 'boolean',
+            'allows_points' => 'boolean',
             'is_taxed' => 'boolean',
             'available_options' => 'array',
             'images' => 'array',
@@ -30,6 +32,7 @@ class Product extends Model
     public function orderItems() { return $this->hasMany(OrderItem::class); }
 
     public function scopeActive($q) { return $q->where('is_active', true); }
+    public function scopeOnSale($q) { return $q->where('discount_percent', '>', 0); }
     public function scopeSearch($q, $term) {
         return $q->where(function($query) use ($term) {
             $query->where('name', 'like', "%{$term}%")
@@ -38,6 +41,32 @@ class Product extends Model
         });
     }
     public function reviews() { return $this->hasMany(Review::class); }
+
+    public function hasDiscount(): bool
+    {
+        return (int) ($this->discount_percent ?? 0) > 0;
+    }
+
+    public function originalPrice(): float
+    {
+        return (float) $this->price;
+    }
+
+    /** Precio final efectivo aplicando el porcentaje de descuento del comerciante (si existe). */
+    public function effectivePrice(): float
+    {
+        $basePrice = (float) $this->price;
+        $pct = min(90, max(0, (int) ($this->discount_percent ?? 0)));
+        if ($pct > 0) {
+            return round($basePrice * (1 - ($pct / 100)), 0);
+        }
+        return $basePrice;
+    }
+
+    public function discountAmount(): float
+    {
+        return max(0, $this->originalPrice() - $this->effectivePrice());
+    }
 
     public function isService(): bool
     {

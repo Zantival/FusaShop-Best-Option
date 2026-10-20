@@ -14,8 +14,8 @@
                         ← Volver al Centro de Mando
                     </a>
                 @else
-                    <a href="{{ route('merchant.dashboard') }}" class="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 shadow-sm transition-all">
-                        ← Volver a Mi Panel Comercial
+                    <a href="{{ route('merchant.reports') }}" class="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 shadow-sm transition-all">
+                        ← Volver a Reportes de Ventas
                     </a>
                 @endif
                 <a href="{{ route('notifications.index') }}" class="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 shadow-sm transition-all">
@@ -26,6 +26,9 @@
                 @if(auth()->id() === $merchant->id && $merchant->role === 'merchant')
                     <a href="{{ route('merchant.inventory') }}" class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-black text-emerald-700 hover:bg-emerald-100 transition-all">
                         📦 Gestionar Mi Inventario
+                    </a>
+                    <a href="{{ route('merchant.reports.export-csv') }}" class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-black hover:bg-emerald-700 shadow-sm transition-all">
+                        📥 Descargar CSV (Excel)
                     </a>
                 @endif
                 <button type="button" onclick="window.print()" class="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-black hover:bg-emerald-700 shadow-sm transition-all">

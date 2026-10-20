@@ -126,6 +126,20 @@ class FactusService
     public function issue(Order $order): array
     {
         $payload = $this->buildPayload($order);
+        $cfg = config('services.factus');
+
+        // En sandbox sin credenciales configuradas: emitir factura simulada para pruebas
+        if ((empty($cfg['client_id']) || empty($cfg['username'])) && ($cfg['env'] ?? 'sandbox') === 'sandbox') {
+            $num = 'SETP-' . rand(1000, 9999);
+            $cufe = hash('sha384', $order->reference . time());
+            return [
+                'payload' => $payload,
+                'number' => $num,
+                'cufe' => $cufe,
+                'raw' => ['sandbox' => true, 'mock' => true, 'status' => 'Habilitación Sandbox DIAN']
+            ];
+        }
+
         $res = $this->client()->post('/v1/bills/validate', $payload);
 
         if ($res->failed()) {
@@ -153,6 +167,11 @@ class FactusService
 
     private function download(string $path, string $key): string
     {
+        $cfg = config('services.factus');
+        if ((empty($cfg['client_id']) || empty($cfg['username'])) && ($cfg['env'] ?? 'sandbox') === 'sandbox') {
+            return "%PDF-1.4\n% FusaShop Factura Electronica DIAN Sandbox (Simulacion)\n";
+        }
+
         $res = $this->client()->get($path);
         $b64 = $res->json("data.{$key}");
         if ($res->failed() || !$b64) {

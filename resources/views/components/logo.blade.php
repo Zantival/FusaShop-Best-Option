@@ -1,10 +1,24 @@
 @props([
     'size' => 'default', // 'sm', 'default', 'lg', 'xl'
     'withMicrocopy' => false,
-    'href' => route('consumer.home')
+    'href' => null
 ])
 
 @php
+if (!$href) {
+    if (auth()->check()) {
+        if (auth()->user()->isMerchant()) {
+            $href = route('merchant.dashboard');
+        } elseif (auth()->user()->isAnalyst()) {
+            $href = route('analyst.dashboard');
+        } else {
+            $href = route('consumer.home');
+        }
+    } else {
+        $href = route('consumer.home');
+    }
+}
+
 $sizeClasses = match($size) {
     'sm' => ['icon' => 'w-7 h-7 text-xs', 'text' => 'text-base', 'sub' => 'text-[9px]', 'logo' => 'h-7 max-w-32'],
     'lg' => ['icon' => 'w-11 h-11 text-lg', 'text' => 'text-2xl', 'sub' => 'text-xs', 'logo' => 'h-11 max-w-56'],

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Tests\TestCase;
 
 class AdminLoginRedirectTest extends TestCase
@@ -12,6 +13,8 @@ class AdminLoginRedirectTest extends TestCase
 
     public function test_admin_login_opens_the_admin_dashboard_even_if_shop_was_the_intended_url(): void
     {
+        $this->withoutMiddleware(ThrottleRequests::class);
+
         User::create([
             'name' => 'FusaShop Admin',
             'email' => 'admin@example.com',

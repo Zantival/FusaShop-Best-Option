@@ -1,12 +1,12 @@
 @extends('layouts.app')
 @section('title','Catálogo')
 @section('content')
-<div class="max-w-7xl mx-auto px-6 py-8">
+<div class="max-w-7xl mx-auto px-4 md:px-6 pt-3 pb-8">
 
   <!-- Breadcrumb hacia Inicio -->
-  <nav class="flex items-center gap-2 text-xs text-slate-500 mb-6">
+  <nav class="flex items-center gap-1.5 text-[11px] text-slate-500 mb-3">
     <a href="{{ route('consumer.home') }}" class="flex items-center gap-1 font-bold text-slate-700 hover:text-[#10B981] transition-colors">
-      <span class="material-symbols-outlined text-sm">home</span>
+      <span class="material-symbols-outlined text-xs">home</span>
       <span>Inicio</span>
     </a>
     <span>/</span>
@@ -17,30 +17,7 @@
     @endif
   </nav>
 
-  @if(isset($directory) && count($directory) > 0)
-    <div class="mb-8">
-      <div class="flex items-center gap-2 mb-4">
-        <span class="material-symbols-outlined text-primary">verified</span>
-        <h3 class="text-lg font-bold text-on-background font-['Manrope']">Vendedores Oficiales</h3>
-      </div>
-      <div class="flex gap-6 overflow-x-auto pb-4 scrollbar-hide">
-        @foreach($directory as $brand)
-          <a href="{{ route('consumer.merchant.profile', $brand->merchant_id) }}" class="flex flex-col items-center gap-2 group shrink-0">
-            <div class="w-20 h-20 rounded-full bg-surface-container border border-outline-variant/50 flex items-center justify-center overflow-hidden group-hover:border-primary group-hover:ring-4 group-hover:ring-primary-fixed transition-all shadow-sm">
-              @if($brand->logo_path)
-                <img src="{{ Storage::url($brand->logo_path) }}" alt="{{ $brand->company_name }}" class="w-full h-full object-cover">
-              @else
-                <span class="material-symbols-outlined text-on-surface-variant text-3xl group-hover:text-primary transition-colors">store</span>
-              @endif
-            </div>
-            <span class="text-xs font-bold text-center text-on-surface w-24 truncate">{{ $brand->company_name }}</span>
-          </a>
-        @endforeach
-      </div>
-    </div>
-  @endif
-
-  <div class="flex flex-col md:flex-row gap-8">
+  <div class="flex flex-col md:flex-row gap-6">
     <aside class="w-full md:w-56 shrink-0">
       <div class="bg-white rounded-2xl p-5 shadow-sm sticky top-20">
         <h2 class="font-['Manrope'] font-bold text-[#1b1c1c] mb-4 flex items-center gap-2">
@@ -65,31 +42,50 @@
             <div><label class="text-xs font-semibold text-[#3c4a41] block mb-1">Mín $</label><input type="number" name="min_price" value="{{ request('min_price') }}" min="0" class="w-full py-2 px-2 bg-[#f0eded] rounded-xl border-0 outline-none text-sm" placeholder="0"/></div>
             <div><label class="text-xs font-semibold text-[#3c4a41] block mb-1">Máx $</label><input type="number" name="max_price" value="{{ request('max_price') }}" min="0" class="w-full py-2 px-2 bg-[#f0eded] rounded-xl border-0 outline-none text-sm" placeholder="∞"/></div>
           </div>
+          <div class="space-y-2 pt-1 border-t border-slate-100">
+            <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+              <input type="checkbox" name="on_sale" value="1" {{ request()->boolean('on_sale') ? 'checked' : '' }} class="rounded text-[#ba1a1a] focus:ring-[#ba1a1a]">
+              <span class="flex items-center gap-1"><span class="material-symbols-outlined text-sm text-[#ba1a1a]">local_offer</span> En Descuento (% OFF)</span>
+            </label>
+            <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+              <input type="checkbox" name="allows_points" value="1" {{ request()->boolean('allows_points') ? 'checked' : '' }} class="rounded text-amber-500 focus:ring-amber-500">
+              <span class="flex items-center gap-1"><span class="material-symbols-outlined text-sm text-amber-500">toll</span> Aplica FusaCoins</span>
+            </label>
+          </div>
           <button type="submit" class="w-full py-2 text-white font-semibold rounded-xl hover:opacity-90 text-sm" style="background:linear-gradient(135deg,#006c47,#00b67a)">Filtrar</button>
-          @if(request()->anyFilled(['search','category','min_price','max_price']))
+          @if(request()->anyFilled(['search','category','min_price','max_price','on_sale','allows_points']))
             <a href="{{ route('consumer.catalog') }}" class="block text-center text-xs text-[#3c4a41] hover:underline">✕ Limpiar</a>
           @endif
         </form>
       </div>
     </aside>
 
-    <div class="flex-1">
-      <p class="text-[#3c4a41] text-sm mb-5">{{ $products->total() }} producto{{ $products->total()!=1?'s':'' }} encontrados</p>
-      @if($products->isEmpty())
-        <div class="text-center py-20 bg-white rounded-2xl shadow-sm">
-          <span class="material-symbols-outlined text-7xl text-[#3c4a41] block mb-3">search_off</span>
-          <p class="text-[#3c4a41]">No se encontraron productos.</p>
-          <a href="{{ route('consumer.catalog') }}" class="hover:underline mt-2 inline-block text-sm font-semibold" style="color:#006c47">Ver todos</a>
-        </div>
-      @else
-        <div class="grid grid-cols-2 lg:grid-cols-3 gap-5">
-          @foreach($products as $p)
-          <x-product-card :product="$p" />
-          @endforeach
-        </div>
-        <div class="mt-8">{{ $products->links() }}</div>
-      @endif
+    <div class="flex-1" id="catalog-products-container">
+      @include('consumer.partials.products-grid', ['products' => $products])
     </div>
   </div>
+
+  @if(isset($directory) && count($directory) > 0)
+    <div class="mt-12 pt-6 border-t border-slate-200">
+      <div class="flex items-center gap-2 mb-4">
+        <span class="material-symbols-outlined text-[#10B981]">verified</span>
+        <h3 class="text-sm font-bold text-slate-800">Tiendas y Vendedores Oficiales</h3>
+      </div>
+      <div class="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
+        @foreach($directory as $brand)
+          <a href="{{ route('consumer.merchant.profile', $brand->merchant_id) }}" class="flex items-center gap-2.5 p-2 pr-4 bg-white rounded-xl border border-slate-100 shadow-xs hover:border-emerald-300 hover:shadow-md transition-all group shrink-0">
+            <div class="w-9 h-9 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
+              @if($brand->logo_path)
+                <img src="{{ Storage::url($brand->logo_path) }}" alt="{{ $brand->company_name }}" class="w-full h-full object-cover">
+              @else
+                <span class="material-symbols-outlined text-slate-400 text-lg group-hover:text-[#10B981] transition-colors">store</span>
+              @endif
+            </div>
+            <span class="text-xs font-bold text-slate-700 group-hover:text-[#10B981] transition-colors">{{ $brand->company_name }}</span>
+          </a>
+        @endforeach
+      </div>
+    </div>
+  @endif
 </div>
 @endsection

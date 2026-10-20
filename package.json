@@ -6,7 +6,7 @@
         "build": "npm run css:build && npm run copy:public-to-dist",
         "css:build": "tailwindcss -i ./resources/css/app.css -o ./public/assets/css/app.css --minify",
         "css:watch": "tailwindcss -i ./resources/css/app.css -o ./public/assets/css/app.css --watch",
-        "copy:public-to-dist": "rm -rf dist && cp -r public dist"
+        "copy:public-to-dist": "node -e \"const fs=require('node:fs');fs.rmSync('dist',{recursive:true,force:true});fs.cpSync('public','dist',{recursive:true});\""
     },
     "devDependencies": {
         "@tailwindcss/cli": "^4.2.4",

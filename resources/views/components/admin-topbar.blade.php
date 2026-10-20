@@ -4,11 +4,11 @@
   $failedIntegrationsCount = \App\Models\IntegrationLog::where('status', 'failed')->whereNull('resolved_at')->where('created_at', '>=', now()->subDay())->count();
   $openPqrsCount = \App\Models\PQRS::whereIn('status', ['pending', 'in_review'])->count();
   $pendingBannersCount = \App\Models\BannerRequest::where('status', 'pending')->count();
-  $unreadDbNotifs = $adminUser ? $adminUser->unreadNotifications->count() : 0;
+  $unreadDbNotifs = $adminUser ? $adminUser->unreadNotifications()->count() : 0;
   $totalAlertsCount = $pendingKycCount + $failedIntegrationsCount + $openPqrsCount + $pendingBannersCount + $unreadDbNotifs;
 @endphp
 
-<aside aria-label="Barra lateral de administración"
+<aside id="panel-sidebar" data-panel-type="admin" aria-label="Barra lateral de administración"
        class="bg-white border-r border-slate-200 shadow-sm flex flex-col justify-between select-none"
        style="width: 270px; min-width: 270px; height: 100vh; position: sticky; top: 0; left: 0; z-index: 60; overflow-y: auto;">
 
@@ -77,17 +77,17 @@
       </div>
     </div>
 
-    <!-- 3. CAMPANA DE NOTIFICACIONES Y BOTÓN PQRS -->
-    <div id="notification-menu" class="space-y-2">
-      <div class="grid grid-cols-2 gap-2">
-        <!-- Botón Unificado de Notificaciones -->
+    <!-- 3. CAMPANA DE ALERTAS Y BOTÓN PQRS (BOTONES MÁS PEQUEÑOS Y ELEGANTES) -->
+    <div id="notification-menu" class="space-y-1.5">
+      <div class="grid grid-cols-2 gap-1.5">
+        <!-- Botón Unificado de Alertas -->
         <button id="notification-menu-toggle" aria-expanded="false" aria-controls="notif-dropdown" type="button" 
-                class="px-3 py-2 rounded-xl hover:bg-emerald-50 border border-slate-200 bg-white text-slate-700 hover:text-[#006c47] transition-all flex items-center justify-center gap-1.5 shadow-2xs text-xs font-extrabold cursor-pointer {{ request()->routeIs('analyst.notifications*') || request()->routeIs('notifications.*') ? 'border-emerald-400 bg-emerald-50 text-[#006c47]' : '' }}" 
+                class="px-2 py-1.5 rounded-xl hover:bg-emerald-50 border border-slate-200 bg-white text-slate-700 hover:text-[#006c47] transition-all flex items-center justify-center gap-1 shadow-2xs text-[11px] font-extrabold cursor-pointer {{ request()->routeIs('analyst.notifications*') || request()->routeIs('notifications.*') ? 'border-emerald-400 bg-emerald-50 text-[#006c47]' : '' }}" 
                 title="Notificaciones y Alertas del Sistema">
-          <span class="material-symbols-outlined text-[18px] text-[#006c47]">notifications</span>
-          <span>Notificaciones</span>
+          <span class="material-symbols-outlined text-[15px] text-[#006c47] shrink-0">notifications</span>
+          <span class="truncate">Alertas</span>
           @if($totalAlertsCount > 0)
-            <span class="bg-[#F97316] text-white text-[10px] font-black px-1.5 py-0.5 rounded-full leading-none">
+            <span class="bg-[#F97316] text-white text-[9px] font-black px-1.5 py-0.5 rounded-full leading-none shrink-0">
               {{ $totalAlertsCount > 99 ? '99+' : $totalAlertsCount }}
             </span>
           @endif
@@ -95,17 +95,33 @@
 
         <!-- Atajo directo PQRS -->
         <a href="{{ route('analyst.pqrs.index') }}" 
-           class="px-3 py-2 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all shadow-2xs {{ request()->routeIs('analyst.pqrs*') ? 'bg-[#006c47] text-white border-[#006c47]' : 'bg-white text-slate-700 border-slate-200 hover:border-[#10B981] hover:text-[#006c47]' }}"
+           class="px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center justify-center gap-1 transition-all shadow-2xs {{ request()->routeIs('analyst.pqrs*') ? 'bg-[#006c47] text-white border-[#006c47]' : 'bg-white text-slate-700 border-slate-200 hover:border-[#10B981] hover:text-[#006c47]' }}"
            title="Atajo directo a PQRS y SLA">
-          <span class="material-symbols-outlined text-[17px]">mail</span>
-          <span>PQRS</span>
+          <span class="material-symbols-outlined text-[15px] shrink-0">mail</span>
+          <span class="truncate">PQRS</span>
           @if($openPqrsCount > 0)
-            <span class="px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none {{ request()->routeIs('analyst.pqrs*') ? 'bg-white text-[#006c47]' : 'bg-emerald-100 text-[#006c47]' }}">
+            <span class="px-1.5 py-0.5 rounded-full text-[9px] font-black leading-none shrink-0 {{ request()->routeIs('analyst.pqrs*') ? 'bg-white text-[#006c47]' : 'bg-emerald-100 text-[#006c47]' }}">
               {{ $openPqrsCount }}
             </span>
           @endif
         </a>
       </div>
+
+      <!-- Botón Fusabot Admin (Estilizado, Pequeño y Redondito) -->
+      <button type="button" onclick="setFusaBotOpen(true)"
+              class="w-full py-1.5 px-3 rounded-full text-white text-xs font-extrabold flex items-center justify-between shadow-[0_3px_12px_rgba(16,185,129,0.28)] hover:shadow-[0_4px_16px_rgba(16,185,129,0.38)] hover:scale-[1.01] active:scale-98 transition-all duration-200 cursor-pointer border border-emerald-400/40 bg-gradient-to-r from-[#006c47] via-[#10B981] to-[#047857] group"
+              title="Abrir Asistente FusaBot IA">
+        <span class="flex items-center gap-2 min-w-0">
+          <span class="relative w-6 h-6 rounded-full bg-white p-0.5 shadow-xs overflow-hidden shrink-0 flex items-center justify-center ring-1 ring-white/60 group-hover:rotate-6 transition-transform">
+            <img src="{{ asset('fusabot.png') }}" alt="FusaBot" class="w-full h-full object-cover">
+          </span>
+          <span class="text-white text-[11.5px] font-extrabold tracking-tight truncate">FusaBot Asistente</span>
+        </span>
+        <span class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase text-white tracking-wider border border-white/30 bg-white/20 backdrop-blur-xs flex items-center gap-1 shrink-0">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-200 animate-pulse"></span>
+          <span>IA</span>
+        </span>
+      </button>
 
       <!-- Panel Desplegable de Notificaciones Agrupadas -->
       <div id="notif-dropdown" class="hidden w-full bg-white rounded-2xl shadow-lg border border-emerald-200 overflow-hidden text-xs">
@@ -135,20 +151,28 @@
           </a>
         </div>
 
-        <div class="max-h-48 overflow-y-auto divide-y divide-slate-100">
-          @forelse($adminUser->notifications()->take(4)->get() as $notif)
-            <div class="p-2.5 hover:bg-slate-50 transition-colors flex items-start gap-2 {{ $notif->read_at ? 'opacity-70' : 'bg-emerald-50/30' }}">
+        <div class="max-h-56 overflow-y-auto divide-y divide-slate-100">
+          @forelse($adminUser->unreadNotifications()->take(6)->get() as $notif)
+            <a href="{{ route('notifications.open', $notif->id) }}"
+               class="p-2.5 hover:bg-emerald-50/80 transition-all flex items-start gap-2 bg-emerald-50/30 group cursor-pointer block"
+               title="Haz clic para abrir y ver el mensaje">
               <div class="w-6 h-6 rounded-full bg-emerald-100 text-[#006c47] flex items-center justify-center shrink-0 mt-0.5">
                 <span class="material-symbols-outlined text-xs">{{ $notif->data['icon'] ?? 'notifications' }}</span>
               </div>
               <div class="flex-1 min-w-0">
-                <p class="font-bold text-slate-800 truncate text-[11px]">{{ $notif->data['title'] ?? 'Alerta del Sistema' }}</p>
-                <p class="text-slate-600 line-clamp-2 text-[10px] mt-0.5">{{ $notif->data['message'] ?? 'Evento administrativo registrado.' }}</p>
+                <p class="font-bold text-slate-800 group-hover:text-[#006c47] truncate text-[11px] transition-colors">{{ $notif->data['title'] ?? 'Alerta del Sistema' }}</p>
+                <p class="text-slate-600 line-clamp-2 text-[10px] mt-0.5 leading-snug">{{ $notif->data['message'] ?? 'Evento administrativo registrado.' }}</p>
+                <div class="flex items-center justify-between mt-1">
+                  <span class="text-[9px] text-slate-400">{{ $notif->created_at->diffForHumans() }}</span>
+                  <span class="text-[10px] font-extrabold text-[#006c47] group-hover:underline flex items-center gap-0.5">
+                    Ver mensaje <span class="material-symbols-outlined text-[11px]">arrow_forward</span>
+                  </span>
+                </div>
               </div>
-            </div>
+            </a>
           @empty
             <div class="py-4 text-center text-slate-400">
-              <p class="text-[11px]">Sin notificaciones adicionales</p>
+              <p class="text-[11px]">Sin notificaciones pendientes por ver</p>
             </div>
           @endforelse
         </div>

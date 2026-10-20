@@ -14,6 +14,10 @@ class ChatController extends Controller
 {
     public function index()
     {
+        if (Auth::user()?->isMerchant()) {
+            return redirect()->route('merchant.messages');
+        }
+
         // Lista de conversaciones (últimos mensajes con otros usuarios)
         $userId = Auth::id();
         $conversations = Message::where('sender_id', $userId)
@@ -30,8 +34,16 @@ class ChatController extends Controller
 
     public function show($otherUserId)
     {
-        $userId = Auth::id();
         $otherUser = User::findOrFail($otherUserId);
+
+        if (Auth::user()?->isMerchant()) {
+            if ($otherUser->isAnalyst()) {
+                return redirect()->route('merchant.support.contact', ['analyst' => $otherUser->id]);
+            }
+            return redirect()->route('merchant.messages', $otherUserId);
+        }
+
+        $userId = Auth::id();
         
         $messages = Message::where(function($q) use ($userId, $otherUserId) {
                 $q->where('sender_id', $userId)->where('receiver_id', $otherUserId);
@@ -44,6 +56,9 @@ class ChatController extends Controller
 
         // Marcar como leídos
         Message::where('sender_id', $otherUserId)->where('receiver_id', $userId)->update(['is_read' => true]);
+        Auth::user()?->unreadNotifications
+            ->filter(fn($n) => ($n->data['sender_id'] ?? null) == $otherUserId)
+            ->each->markAsRead();
 
         $badWords = Message::getBadWords();
 
@@ -78,6 +93,9 @@ class ChatController extends Controller
 
         // Marcar como leídos los del otro
         Message::where('sender_id', $otherUserId)->where('receiver_id', $userId)->update(['is_read' => true]);
+        Auth::user()?->unreadNotifications
+            ->filter(fn($n) => ($n->data['sender_id'] ?? null) == $otherUserId)
+            ->each->markAsRead();
 
         return response()->json(['messages' => $messages, 'server_time' => now()->timestamp]);
     }

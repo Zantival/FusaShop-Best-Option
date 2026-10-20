@@ -64,6 +64,34 @@ class AnalystController extends Controller
         return back()->with('success', 'Parámetros globales (Comisión y Tarifas) actualizados correctamente.');
     }
 
+    public function updateHowToStartGuide(Request $request)
+    {
+        $data = $request->validate([
+            'card_badge'         => 'nullable|string|max:100',
+            'card_title'         => 'required|string|max:150',
+            'card_subtitle'      => 'required|string|max:300',
+            'card_button_text'   => 'nullable|string|max:60',
+            'buyer_title'        => 'required|string|max:150',
+            'buyer_description'  => 'required|string|max:1000',
+            'buyer_video_url'    => 'nullable|string|max:500',
+            'buyer_steps'        => 'nullable|string|max:2000',
+            'seller_title'       => 'required|string|max:150',
+            'seller_description' => 'required|string|max:1000',
+            'seller_video_url'   => 'nullable|string|max:500',
+            'seller_why_verify'  => 'required|string|max:2000',
+            'seller_steps'       => 'nullable|string|max:2000',
+            'dian_url'           => 'nullable|string|max:255',
+            'rues_url'           => 'nullable|string|max:255',
+        ]);
+
+        Setting::setValue('how_to_start_guide', json_encode($data), 'content', 'Contenido y videos de la guía ¿No sabes cómo empezar?');
+        Cache::forget('setting.how_to_start_guide');
+
+        AdminAuditLog::record('settings.how_to_start_guide', null, 'Actualización de contenidos y videos de la guía de inicio', [], $data);
+
+        return back()->with('success', '¡Guía «¿No sabes cómo empezar?» y videos actualizados con éxito!');
+    }
+
     public function updateMerchantSector(Request $request, User $user)
     {
         $data = $request->validate([
@@ -274,44 +302,121 @@ class AnalystController extends Controller
         return response()->file($path);
     }
 
+    public function userToggleVerification(Request $request, User $user)
+    {
+        if ($user->role !== 'merchant') {
+            return back()->with('error', 'Solo los usuarios con rol Comerciante pueden recibir o perder el chulito de verificación.');
+        }
+
+        $profile = CompanyProfile::firstOrCreate(
+            ['merchant_id' => $user->id],
+            [
+                'company_name'  => $user->name,
+                'phone'         => $user->phone ?: 'Sin teléfono',
+                'rut_path'      => '',
+                'business_type' => 'Comercio Local',
+                'kyc_status'    => 'pending',
+            ]
+        );
+
+        $before = [
+            'kyc_status' => $profile->kyc_status,
+            'kyc_notes'  => $profile->kyc_notes,
+        ];
+
+        $willVerify = $profile->kyc_status !== 'approved';
+        $newStatus = $willVerify ? 'approved' : 'pending';
+        $notes = $willVerify
+            ? 'Insignia de verificación (chulito) otorgada por el Analista.'
+            : 'Insignia de verificación (chulito) retirada por el Analista.';
+
+        $profile->update([
+            'kyc_status'         => $newStatus,
+            'kyc_rejection_code' => null,
+            'kyc_notes'          => $notes,
+        ]);
+
+        AdminAuditLog::record(
+            $willVerify ? 'kyc.verified_granted' : 'kyc.verified_revoked',
+            $profile,
+            $notes,
+            $before,
+            ['kyc_status' => $newStatus]
+        );
+
+        try {
+            $user->notify(new \App\Notifications\KycDecisionNotification($profile));
+        } catch (\Throwable $e) {
+            // Si el envío de correo falla en entorno local sin API key, la notificación en BD ya quedó registrada
+        }
+
+        $msg = $willVerify
+            ? "✓ Chulito de verificación otorgado a «{$profile->company_name}»."
+            : "Se retiró el chulito de verificación a «{$profile->company_name}».";
+
+        return back()->with('success', $msg);
+    }
+
     public function updateKyc(Request $request, User $user)
     {
         $request->validate([
-            'kyc_status'         => 'required|in:approved,rejected',
+            'kyc_status'         => 'required|in:approved,pending,rejected',
             'kyc_rejection_code' => 'nullable|string|max:60',
             'kyc_notes'          => 'nullable|string|max:1000',
         ]);
 
-        $profile = $user->companyProfile;
-        if ($profile) {
-            $before = ['kyc_status' => $profile->kyc_status, 'kyc_notes' => $profile->kyc_notes];
-            $reasonLabels = [
-                'rut_ilegible'            => 'Documento RUT ilegible o incompleto',
-                'nit_no_coincide'         => 'El NIT o razón social no coincide con el titular',
-                'documento_vencido'       => 'Certificado o RUT desactualizado',
-                'actividad_ciiu_invalida' => 'Actividad económica CIIU no corresponde al giro declarable',
-            ];
-            $code = $request->kyc_rejection_code;
-            $compiledNotes = $request->kyc_notes;
-            if ($request->kyc_status === 'rejected' && $code && isset($reasonLabels[$code])) {
-                $compiledNotes = trim($reasonLabels[$code] . ($compiledNotes ? ': ' . $compiledNotes : ''));
-            }
+        $profile = CompanyProfile::firstOrCreate(
+            ['merchant_id' => $user->id],
+            [
+                'company_name'  => $user->name,
+                'phone'         => $user->phone ?: 'Sin teléfono',
+                'rut_path'      => '',
+                'business_type' => 'Comercio Local',
+                'kyc_status'    => 'pending',
+            ]
+        );
 
-            $profile->update([
-                'kyc_status'         => $request->kyc_status,
-                'kyc_rejection_code' => $request->kyc_status === 'rejected' ? $code : null,
-                'kyc_notes'          => $compiledNotes,
-            ]);
-
-            AdminAuditLog::record('kyc.' . $request->kyc_status, $profile, $compiledNotes ?? 'Decisión KYC', $before, [
-                'kyc_status' => $request->kyc_status,
-                'kyc_rejection_code' => $code,
-            ]);
-
-            $user->notify(new \App\Notifications\KycDecisionNotification($profile));
+        $before = ['kyc_status' => $profile->kyc_status, 'kyc_notes' => $profile->kyc_notes];
+        $reasonLabels = [
+            'rut_ilegible'            => 'Documento RUT ilegible o incompleto',
+            'nit_no_coincide'         => 'El NIT o razón social no coincide con el titular',
+            'documento_vencido'       => 'Certificado o RUT desactualizado',
+            'actividad_ciiu_invalida' => 'Actividad económica CIIU no corresponde al giro declarable',
+        ];
+        $code = $request->kyc_rejection_code;
+        $compiledNotes = $request->kyc_notes;
+        if ($request->kyc_status === 'rejected' && $code && isset($reasonLabels[$code])) {
+            $compiledNotes = trim($reasonLabels[$code] . ($compiledNotes ? ': ' . $compiledNotes : ''));
+        } elseif ($request->kyc_status === 'pending' && !$compiledNotes) {
+            $compiledNotes = 'Insignia de verificación retirada por el Analista.';
+        } elseif ($request->kyc_status === 'approved' && !$compiledNotes) {
+            $compiledNotes = 'Comercio verificado y aprobado por el Analista.';
         }
 
-        return back()->with('success', 'Estado KYC actualizado, registrado en auditoría y comerciante notificado.');
+        $profile->update([
+            'kyc_status'         => $request->kyc_status,
+            'kyc_rejection_code' => $request->kyc_status === 'rejected' ? $code : null,
+            'kyc_notes'          => $compiledNotes,
+        ]);
+
+        AdminAuditLog::record('kyc.' . $request->kyc_status, $profile, $compiledNotes ?? 'Decisión KYC', $before, [
+            'kyc_status'         => $request->kyc_status,
+            'kyc_rejection_code' => $code,
+        ]);
+
+        try {
+            $user->notify(new \App\Notifications\KycDecisionNotification($profile));
+        } catch (\Throwable $e) {
+            // La notificación en base de datos se conserva aunque el transporte SMTP/Resend no esté activo
+        }
+
+        $statusMsg = match ($request->kyc_status) {
+            'approved' => "✓ Chulito de verificación otorgado a «{$profile->company_name}».",
+            'pending'  => "Se retiró el chulito de verificación a «{$profile->company_name}» (estado: sin verificar).",
+            default    => "Verificación KYC rechazada para «{$profile->company_name}».",
+        };
+
+        return back()->with('success', $statusMsg);
     }
 
     // ─── Pedidos Globales ──────────────────────────────────────────────────────
@@ -368,6 +473,16 @@ class AnalystController extends Controller
         };
 
         return response()->stream($callback, 200, $headers);
+    }
+
+    /** Descarga de Factura Electrónica DIAN (Factus PDF / XML) para el Administrador / E-commerce */
+    public function orderInvoice(Order $order, string $format)
+    {
+        abort_unless(in_array($format, ['pdf', 'xml'], true), 404);
+        $path = $format === 'pdf' ? $order->invoice_pdf_path : $order->invoice_xml_path;
+        abort_unless($path && Storage::disk('local')->exists($path), 404, 'La factura electrónica aún no está disponible.');
+
+        return Storage::disk('local')->download($path, "factura-{$order->invoice_number}.{$format}");
     }
 
     protected function buildOrdersQuery(Request $request)
@@ -466,21 +581,27 @@ class AnalystController extends Controller
     public function banners()
     {
         $banners = GlobalBanner::orderBy('sort_order')->get();
+        $activeBannersCount = $banners->where('is_active', true)->count();
         $pendingRequests = BannerRequest::with('user.companyProfile')->latest()->get();
         $bannerFee = Setting::bannerFee();
 
-        // 1. Detección inteligente de productos con descuentos u ofertas de comerciantes
-        $allActiveProducts = Product::with('merchant.companyProfile')->where('is_active', true)->get();
+        // 1. Detección de productos con descuento real (% OFF) o promociones de comerciantes
+        $allActiveProducts = Product::with('merchant.companyProfile')
+            ->where('is_active', true)
+            ->orderByDesc('discount_percent')
+            ->get();
         
         $discountedProducts = $allActiveProducts->filter(function ($prod) {
+            if ($prod->hasDiscount()) {
+                return true;
+            }
             $text = mb_strtolower($prod->name . ' ' . $prod->description . ' ' . $prod->category);
             return str_contains($text, 'descuento') 
                 || str_contains($text, 'oferta') 
                 || str_contains($text, 'promo') 
                 || str_contains($text, 'rebaja') 
-                || str_contains($text, '%')
                 || (isset($prod->specifications['discount_pct']) && (int)$prod->specifications['discount_pct'] > 0);
-        });
+        })->values();
 
         // Agrupación por categoría de productos en descuento
         $categoriesWithDiscounts = $discountedProducts->groupBy('category')->map(function ($items, $cat) {
@@ -503,55 +624,18 @@ class AnalystController extends Controller
             $categoriesList = collect(['Electrónica', 'Ropa', 'Alimentos', 'Turismo', 'Gastronomía', 'Hogar']);
         }
 
-        // Cargar Tarjetas Promocionales guardadas
+        // Cargar Tarjetas Promocionales guardadas (sin auto-sembrar tarjetas por defecto si está vacío)
         $rawCards = Setting::getValue('promotional_cards');
-        $promotionalCards = $rawCards ? json_decode($rawCards, true) : null;
-        if (!is_array($promotionalCards) || empty($promotionalCards)) {
-            $promotionalCards = [
-                [
-                    'id' => 'card-1',
-                    'category' => 'Electrónica',
-                    'title' => 'Tecnología & Cómputo — Hasta 30% OFF',
-                    'subtitle' => 'Comercios de Fusagasugá con precios rebajados en audio, laptops y periféricos.',
-                    'discount_badge' => '30% OFF',
-                    'bg_gradient' => 'from-emerald-950 via-slate-900 to-emerald-900',
-                    'is_active' => true,
-                    'source' => 'system_discount',
-                    'products_count' => max($allActiveProducts->where('category', 'Electrónica')->count(), 6),
-                    'created_at' => now()->subDays(2)->format('d/m/Y'),
-                ],
-                [
-                    'id' => 'card-2',
-                    'category' => 'Ropa',
-                    'title' => 'Moda & Calzado Sumapaz — 20% de Descuento',
-                    'subtitle' => 'Prendas locales, calzado y accesorios de comerciantes del centro con entrega express.',
-                    'discount_badge' => '20% OFF',
-                    'bg_gradient' => 'from-teal-950 via-slate-900 to-emerald-950',
-                    'is_active' => true,
-                    'source' => 'merchant_offer',
-                    'products_count' => max($allActiveProducts->where('category', 'Ropa')->count(), 9),
-                    'created_at' => now()->subDays(1)->format('d/m/Y'),
-                ],
-                [
-                    'id' => 'card-3',
-                    'category' => 'Turismo',
-                    'title' => 'Ruta Glamping Chinauta — Vouchers con 15% OFF',
-                    'subtitle' => 'Hospedajes de montaña y pasadías O2O con confirmación instantánea por código QR.',
-                    'discount_badge' => '15% OFF',
-                    'bg_gradient' => 'from-emerald-950 via-green-950 to-slate-900',
-                    'is_active' => true,
-                    'source' => 'merchant_offer',
-                    'products_count' => max($allActiveProducts->where('category', 'Turismo')->count(), 4),
-                    'created_at' => now()->format('d/m/Y'),
-                ],
-            ];
-            Setting::setValue('promotional_cards', json_encode($promotionalCards), 'marketing', 'Tarjetas promocionales por categoría');
+        $promotionalCards = $rawCards ? json_decode($rawCards, true) : [];
+        if (!is_array($promotionalCards)) {
+            $promotionalCards = [];
         }
 
         $activeCardsCount = count(array_filter($promotionalCards, fn($c) => !empty($c['is_active'])));
 
         return view('analyst.banners', compact(
-            'banners', 
+            'banners',
+            'activeBannersCount',
             'pendingRequests', 
             'bannerFee', 
             'allActiveProducts',
@@ -566,7 +650,12 @@ class AnalystController extends Controller
     public function bannerRequestShow($id)
     {
         $requestInfo = BannerRequest::with('user.companyProfile')->findOrFail($id);
-        return view('analyst.banner-request-detail', compact('requestInfo'));
+        $merchantProducts = Product::where('merchant_id', $requestInfo->user_id)
+            ->where('is_active', true)
+            ->orderByDesc('discount_percent')
+            ->orderBy('name')
+            ->get();
+        return view('analyst.banner-request-detail', compact('requestInfo', 'merchantProducts'));
     }
 
     public function bannerRequestApprove(Request $request, $id)
@@ -576,14 +665,112 @@ class AnalystController extends Controller
             return back()->with('error', 'Esta solicitud ya ha sido procesada.');
         }
 
-        $requestInfo->update(['status' => 'approved']);
-        $linkUrl = route('consumer.merchant.profile', $requestInfo->user_id);
-        if ($request->input('link_type') === 'custom' && $request->filled('custom_link_url')) {
-            $linkUrl = $request->custom_link_url;
+        $publishAs = $request->input('publish_as', $requestInfo->target_type === 'promo_card' ? 'promo_card' : 'banner');
+
+        // Si el analista seleccionó o ajustó los productos vinculados en el formulario
+        $linkedProducts = is_array($requestInfo->selected_products) ? $requestInfo->selected_products : [];
+        if ($request->filled('product_ids') && is_array($request->product_ids)) {
+            $prods = Product::where('merchant_id', $requestInfo->user_id)
+                ->whereIn('id', $request->product_ids)
+                ->get();
+            if ($prods->isNotEmpty()) {
+                $linkedProducts = $prods->map(fn($p) => [
+                    'id'               => $p->id,
+                    'name'             => $p->name,
+                    'category'         => $p->category,
+                    'original_price'   => (float) $p->price,
+                    'price'            => (float) $p->effectivePrice(),
+                    'discount_percent' => (int) ($p->discount_percent ?? 0),
+                    'url'              => route('consumer.product', $p->id),
+                    'image'            => $p->image_url ?? null,
+                ])->values()->all();
+            }
         }
 
+        // Calcular URL de destino hacia los productos vinculados o hacia la tienda del comerciante
+        $storeUrl = route('consumer.merchant.profile', $requestInfo->user_id);
+        $linkUrl = $storeUrl;
+
+        if ($request->input('link_type') === 'custom' && $request->filled('custom_link_url')) {
+            $linkUrl = $request->custom_link_url;
+        } elseif ($request->input('link_type') === 'profile' && $publishAs === 'banner') {
+            $linkUrl = $storeUrl;
+        } elseif ($request->filled('selected_target_url')) {
+            $linkUrl = $request->selected_target_url;
+        } elseif (!empty($linkedProducts)) {
+            if (count($linkedProducts) === 1) {
+                $linkUrl = route('consumer.product', $linkedProducts[0]['id']);
+            } else {
+                $linkUrl = route('consumer.catalog', ['products' => implode(',', array_column($linkedProducts, 'id'))]);
+            }
+        } elseif ($requestInfo->target_url) {
+            $linkUrl = $requestInfo->target_url;
+        }
+
+        $requestInfo->update([
+            'status'            => 'approved',
+            'selected_products' => $linkedProducts,
+            'target_url'        => $linkUrl,
+        ]);
+
+        $merchantName = $requestInfo->user->companyProfile->company_name ?? $requestInfo->user->name ?? 'Tienda Local';
+
+        // Caso A: Publicar como Tarjeta Promocional Única vinculada a los productos en descuento del comerciante
+        if ($publishAs === 'promo_card') {
+            $rawCards = Setting::getValue('promotional_cards');
+            $cards = $rawCards ? json_decode($rawCards, true) : [];
+            if (!is_array($cards)) {
+                $cards = [];
+            }
+
+            $maxDiscount = collect($linkedProducts)->max('discount_percent');
+            $badgeText = $request->input('discount_badge')
+                ?: ($maxDiscount > 0 ? "-{$maxDiscount}% OFF" : 'PROMO EXCLUSIVA');
+
+            $firstCategory = $linkedProducts[0]['category'] ?? 'Promoción Especial';
+            $cardTitle = $request->input('banner_title')
+                ?: ($requestInfo->title ?: "Oferta Especial — {$merchantName}");
+
+            $newCard = [
+                'id'             => 'card-' . uniqid(),
+                'request_id'     => $requestInfo->id,
+                'merchant_id'    => $requestInfo->user_id,
+                'merchant_name'  => $merchantName,
+                'category'       => $firstCategory,
+                'title'          => strip_tags($cardTitle),
+                'subtitle'       => strip_tags($requestInfo->notes ?: "Productos seleccionados en descuento directo de {$merchantName}."),
+                'discount_badge' => strip_tags($badgeText),
+                'image_url'      => $requestInfo->image_url,
+                'target_url'     => $linkUrl,
+                'products'       => $linkedProducts,
+                'products_count' => count($linkedProducts) ?: 1,
+                'bg_gradient'    => 'from-emerald-950 via-slate-900 to-emerald-900',
+                'is_active'      => true,
+                'source'         => 'merchant_paid_promo_card',
+                'created_at'     => now()->format('d/m/Y'),
+            ];
+
+            array_unshift($cards, $newCard);
+            Setting::setValue('promotional_cards', json_encode($cards), 'marketing');
+
+            AdminAuditLog::record('banner_request.approved_promo_card', $requestInfo, 'Aprobación y vinculación de Tarjeta Promocional Única de comerciante', null, ['card_id' => $newCard['id']]);
+            return redirect()->route('analyst.banners', ['tab' => 'promos'])->with('success', 'Tarjeta Promocional Única vinculada a los productos del comerciante y publicada en la vitrina.');
+        }
+
+        // Caso B: Publicar como Banner Publicitario (máximo 8 activos: 4 arriba y 4 abajo)
+        $activeBanners = GlobalBanner::where('is_active', true)->orderBy('sort_order')->orderBy('id')->get();
+        if ($activeBanners->count() >= 8) {
+            // Desactivar el más antiguo para mantener máximo 8 activos
+            $oldest = $activeBanners->first();
+            if ($oldest) {
+                $oldest->update(['is_active' => false]);
+            }
+        }
+
+        $bannerTitle = $request->input('banner_title') ?: ($requestInfo->title ?: ('Banner Patrocinado - ' . $merchantName));
+
         $banner = GlobalBanner::create([
-            'title'      => 'Banner Patrocinado - ' . ($requestInfo->user->companyProfile->company_name ?? 'Comerciante'),
+            'title'      => $bannerTitle,
             'image_path' => $requestInfo->image_path,
             'link_url'   => $linkUrl,
             'is_active'  => true,
@@ -593,7 +780,7 @@ class AnalystController extends Controller
         ]);
 
         AdminAuditLog::record('banner_request.approved', $requestInfo, 'Aprobación y publicación de banner patrocinado', null, ['banner_id' => $banner->id]);
-        return redirect()->route('analyst.banners')->with('success', 'Solicitud aprobada y publicada con vigencia de 30 días.');
+        return redirect()->route('analyst.banners', ['tab' => 'banners'])->with('success', 'Banner aprobado y publicado (enlazado directamente a la tienda/oferta) con vigencia de 30 días.');
     }
 
     public function bannerRequestReject(Request $request, $id)
@@ -621,13 +808,18 @@ class AnalystController extends Controller
             'ends_at'    => 'nullable|date|after_or_equal:starts_at',
         ]);
 
+        $activeCount = GlobalBanner::where('is_active', true)->count();
+        if ($activeCount >= 8) {
+            return back()->with('error', 'Ya existen 8 banners activos (4 en el espacio superior y 4 en el inferior). Desactiva o elimina uno antes de publicar otro.');
+        }
+
         $path = $request->file('image')->store('global_banners', 'public');
         $banner = GlobalBanner::create([
             'title'      => strip_tags($request->title ?? ''),
             'image_path' => $path,
             'link_url'   => $request->link_url,
             'is_active'  => true,
-            'sort_order' => $request->sort_order ?? 0,
+            'sort_order' => $request->sort_order ?? ((int) GlobalBanner::max('sort_order') + 1),
             'starts_at'  => $request->starts_at,
             'ends_at'    => $request->ends_at,
         ]);
@@ -638,6 +830,10 @@ class AnalystController extends Controller
 
     public function bannerToggle(GlobalBanner $banner)
     {
+        if (!$banner->is_active && GlobalBanner::where('is_active', true)->count() >= 8) {
+            return back()->with('error', 'Límite alcanzado: máximo 8 banners activos simultáneamente (4 arriba y 4 abajo). Desactiva otro banner primero.');
+        }
+
         $banner->update(['is_active' => !$banner->is_active]);
         AdminAuditLog::record('banner.toggled', $banner, 'Estado activo cambiado a ' . ($banner->is_active ? 'activo' : 'inactivo'));
         return back()->with('success', 'Banner ' . ($banner->is_active ? 'activado' : 'desactivado') . '.');
@@ -670,35 +866,88 @@ class AnalystController extends Controller
     public function promotionalCardStore(Request $request)
     {
         $request->validate([
-            'category'       => 'required|string|max:100',
+            'category'       => 'nullable|string|max:100',
             'title'          => 'required|string|max:200',
             'subtitle'       => 'nullable|string|max:300',
             'discount_badge' => 'required|string|max:50',
             'bg_gradient'    => 'nullable|string|max:100',
+            'image'          => 'nullable|image|mimes:jpg,jpeg,png,webp|max:5120',
+            'product_ids'    => 'nullable|array',
+            'product_ids.*'  => 'integer|exists:products,id',
         ]);
 
         $rawCards = Setting::getValue('promotional_cards');
         $cards = $rawCards ? json_decode($rawCards, true) : [];
         if (!is_array($cards)) $cards = [];
 
+        $imageUrl = null;
+        if ($request->hasFile('image')) {
+            $path = $request->file('image')->store('banners/promo_cards', 'public');
+            $imageUrl = asset('storage/' . $path);
+        }
+
+        $linkedProducts = [];
+        $targetUrl = null;
+        $merchantName = null;
+        $category = strip_tags($request->category ?: 'Promoción');
+
+        if (!empty($request->product_ids)) {
+            $prods = Product::with('merchant.companyProfile')->whereIn('id', $request->product_ids)->get();
+            foreach ($prods as $p) {
+                $linkedProducts[] = [
+                    'id'               => $p->id,
+                    'name'             => $p->name,
+                    'category'         => $p->category,
+                    'original_price'   => (float) $p->price,
+                    'price'            => (float) $p->effectivePrice(),
+                    'discount_percent' => (int) ($p->discount_percent ?? 0),
+                    'url'              => route('consumer.product', $p->id),
+                    'image'            => $p->image_url ?? null,
+                ];
+                if (!$imageUrl && $p->image_url) {
+                    $imageUrl = $p->image_url;
+                }
+                if (!$merchantName && $p->merchant) {
+                    $merchantName = $p->merchant->companyProfile->company_name ?? $p->merchant->name;
+                }
+                if ($p->category && $category === 'Promoción') {
+                    $category = $p->category;
+                }
+            }
+
+            if (count($linkedProducts) === 1) {
+                $targetUrl = route('consumer.product', $linkedProducts[0]['id']);
+            } elseif (count($linkedProducts) > 1) {
+                $targetUrl = route('consumer.catalog', ['products' => implode(',', array_column($linkedProducts, 'id'))]);
+            }
+        }
+
+        if (!$targetUrl) {
+            $targetUrl = route('consumer.catalog', array_filter(['category' => $category !== 'Promoción' ? $category : null, 'on_sale' => 1]));
+        }
+
         $newCard = [
-            'id' => 'card-' . uniqid(),
-            'category' => strip_tags($request->category),
-            'title' => strip_tags($request->title),
-            'subtitle' => strip_tags($request->subtitle ?? 'Promoción especial en catálogo seleccionado.'),
+            'id'             => 'card-' . uniqid(),
+            'merchant_name'  => $merchantName,
+            'category'       => $category,
+            'title'          => strip_tags($request->title),
+            'subtitle'       => strip_tags($request->subtitle ?? 'Promoción especial en productos seleccionados con descuento.'),
             'discount_badge' => strip_tags($request->discount_badge),
-            'bg_gradient' => $request->bg_gradient ?: 'from-emerald-950 via-slate-900 to-emerald-900',
-            'is_active' => true,
-            'source' => 'admin_created',
-            'products_count' => Product::where('category', $request->category)->where('is_active', true)->count(),
-            'created_at' => now()->format('d/m/Y'),
+            'image_url'      => $imageUrl,
+            'target_url'     => $targetUrl,
+            'products'       => $linkedProducts,
+            'bg_gradient'    => $request->bg_gradient ?: 'from-emerald-950 via-slate-900 to-emerald-900',
+            'is_active'      => true,
+            'source'         => 'admin_created',
+            'products_count' => !empty($linkedProducts) ? count($linkedProducts) : Product::where('category', $category)->where('is_active', true)->count(),
+            'created_at'     => now()->format('d/m/Y'),
         ];
 
         array_unshift($cards, $newCard);
         Setting::setValue('promotional_cards', json_encode($cards), 'marketing');
 
-        AdminAuditLog::record('promotional_card.created', null, 'Nueva tarjeta promocional creada para la categoría ' . $request->category);
-        return redirect()->route('analyst.banners', ['tab' => 'promos'])->with('success', 'Tarjeta promocional creada exitosamente.');
+        AdminAuditLog::record('promotional_card.created', null, 'Nueva tarjeta promocional creada: ' . $request->title);
+        return redirect()->route('analyst.banners', ['tab' => 'promos'])->with('success', 'Tarjeta promocional creada y vinculada exitosamente.');
     }
 
     public function promotionalCardToggle($id)
@@ -781,11 +1030,9 @@ class AnalystController extends Controller
         foreach ($prods as $p) {
             $specs = $p->specifications ?? [];
             $specs['discount_pct'] = $discountPct;
-            $specs['original_price'] = $specs['original_price'] ?? $p->price;
-            $newPrice = round($specs['original_price'] * (1 - ($discountPct / 100)));
             $p->update([
-                'price' => $newPrice,
-                'specifications' => $specs,
+                'discount_percent' => $discountPct,
+                'specifications'   => $specs,
             ]);
         }
 
@@ -800,6 +1047,7 @@ class AnalystController extends Controller
             'title' => $cardTitle,
             'subtitle' => "Campaña oficial FusaShop con {$discountPct}% de descuento aplicado a {$prods->count()} productos de comerciantes locales.",
             'discount_badge' => "{$discountPct}% OFF",
+            'target_url' => route('consumer.catalog', ['category' => $cat, 'on_sale' => 1]),
             'bg_gradient' => 'from-emerald-900 via-slate-900 to-teal-950',
             'is_active' => true,
             'source' => 'system_discount_applied',
@@ -809,8 +1057,18 @@ class AnalystController extends Controller
         array_unshift($cards, $card);
         Setting::setValue('promotional_cards', json_encode($cards), 'marketing');
 
+        $consumers = User::where('role', 'consumer')->where('is_blocked', false)->take(100)->get();
+        foreach ($consumers as $consumer) {
+            $consumer->notify(new \App\Notifications\PromotionDiscountNotification(
+                $card['title'],
+                $card['subtitle'],
+                $card['discount_badge'],
+                $cat
+            ));
+        }
+
         AdminAuditLog::record('category_discount.applied', null, "Descuento del {$discountPct}% aplicado a la categoría {$cat} ({$prods->count()} productos)");
-        return redirect()->route('analyst.banners', ['tab' => 'promos'])->with('success', "¡Descuento del {$discountPct}% aplicado a {$prods->count()} productos de {$cat} y tarjeta promocional publicada!");
+        return redirect()->route('analyst.banners', ['tab' => 'promos'])->with('success', "¡Descuento del {$discountPct}% aplicado a {$prods->count()} productos de {$cat}, tarjeta publicada y clientes notificados!");
     }
 
     // ─── Reportes de Inteligencia, Reseñas por Tema y ML ───────────────────────
@@ -1019,12 +1277,15 @@ class AnalystController extends Controller
         }
 
         // Si viene desde una notificación o si el comerciante abre su reporte, marcar notificaciones relacionadas como leídas
+        $selectedNotif = null;
         if ($request->filled('notification_id')) {
-            $notif = $viewer->notifications()->where('id', $request->input('notification_id'))->first();
-            if ($notif && is_null($notif->read_at)) {
-                $notif->markAsRead();
+            $selectedNotif = $user->notifications()->where('id', $request->input('notification_id'))->first();
+            if ($selectedNotif && is_null($selectedNotif->read_at) && $viewer->id === $user->id) {
+                $selectedNotif->markAsRead();
             }
-        } elseif ($viewer->id === $user->id) {
+        }
+
+        if ($viewer->id === $user->id) {
             $viewer->unreadNotifications
                 ->filter(fn($n) => ($n->data['type'] ?? '') === 'merchant_sales_report')
                 ->each->markAsRead();
@@ -1032,15 +1293,15 @@ class AnalystController extends Controller
 
         $liveReport = $diagnosisService->buildMerchantSalesReport($user);
 
-        // Buscar la última notificación de reporte enviada a este comerciante para mostrar el mensaje exacto del admin
-        $latestNotification = $user->notifications()
+        // Buscar la notificación seleccionada o la última notificación de reporte enviada a este comerciante
+        $latestNotification = $selectedNotif ?? $user->notifications()
             ->get()
             ->first(fn($n) => ($n->data['type'] ?? '') === 'merchant_sales_report');
 
         $savedReport = $latestNotification->data['report_data'] ?? [];
         $report = array_merge($liveReport, array_filter([
             'report_type'    => $savedReport['report_type'] ?? null,
-            'custom_message' => $savedReport['custom_message'] ?? null,
+            'custom_message' => $savedReport['custom_message'] ?? ($latestNotification->data['message'] ?? null),
             'sent_by_name'   => $savedReport['sent_by_name'] ?? null,
             'sent_at_human'  => $savedReport['sent_at_human'] ?? null,
         ]));

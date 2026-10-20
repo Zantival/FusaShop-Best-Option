@@ -11,13 +11,22 @@ use Illuminate\Support\Facades\Storage;
 
 class OrderApprovedMail extends Mailable
 {
-    public function __construct(public Order $order)
-    {
+    public function __construct(
+        public Order $order,
+        public string $recipientType = 'consumer',
+        public ?string $recipientName = null
+    ) {
     }
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: "Compra aprobada · Pedido {$this->order->reference} · FusaShop");
+        $prefix = match ($this->recipientType) {
+            'merchant' => "Venta y Factura Electrónica DIAN · Pedido {$this->order->reference}",
+            'admin'    => "Copia E-Commerce Factura DIAN · Pedido {$this->order->reference}",
+            default    => "Compra aprobada y Factura Electrónica · Pedido {$this->order->reference}",
+        };
+
+        return new Envelope(subject: "{$prefix} · FusaShop");
     }
 
     public function content(): Content

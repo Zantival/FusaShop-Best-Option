@@ -118,32 +118,84 @@
       </div>
     </form>
 
-    @if($user && $user->role === 'merchant' && $user->companyProfile)
-      <!-- Corrección manual del rubro sectorial (§2.1) -->
+    @if($user && $user->role === 'merchant')
+      @php
+        $merchantProfile = $user->companyProfile;
+        $currentKycStatus = $merchantProfile?->kyc_status ?? 'pending';
+        $isVerifiedMerchant = $currentKycStatus === 'approved';
+      @endphp
+
+      <!-- Control Directo del Chulito de Verificación -->
       <div class="mt-8 pt-6 border-t border-slate-200">
-        <h3 class="text-base font-extrabold text-slate-900 mb-3 flex items-center gap-2">
-          <span class="material-symbols-outlined text-[#006c47]">category</span>
-          Clasificación Sectorial y Subsector (Corrección Manual)
-        </h3>
-        <form method="POST" action="{{ route('analyst.users.sector', $user->id) }}" class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-          @csrf
-          <div>
-            <label class="block text-xs font-bold text-slate-600 mb-1">Sector Principal</label>
-            <select name="sector_override" class="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-xs font-bold">
-              @foreach(\App\Services\Admin\SectorCensusService::definitions() as $sKey => $def)
-                <option value="{{ $sKey }}" {{ ($user->companyProfile->sector_override ?? '') === $sKey ? 'selected' : '' }}>{{ $def['title'] }}</option>
-              @endforeach
-            </select>
+        <div class="p-5 rounded-2xl border {{ $isVerifiedMerchant ? 'bg-emerald-50/70 border-emerald-200' : 'bg-amber-50/60 border-amber-200' }} flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="flex items-start gap-3.5">
+            <div class="w-12 h-12 rounded-2xl {{ $isVerifiedMerchant ? 'bg-[#006c47] text-white' : 'bg-amber-100 text-amber-800' }} flex items-center justify-center shrink-0 shadow-xs">
+              <span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' {{ $isVerifiedMerchant ? '1' : '0' }}">
+                {{ $isVerifiedMerchant ? 'verified' : 'verified_off' }}
+              </span>
+            </div>
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h3 class="text-base font-extrabold text-slate-900">Chulito de Verificación del Comerciante</h3>
+                @if($isVerifiedMerchant)
+                  <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-100 text-[#006c47] border border-emerald-300">
+                    <span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1">verified</span>
+                    Activo
+                  </span>
+                @else
+                  <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-white text-amber-800 border border-amber-300">
+                    Sin chulito de verificación
+                  </span>
+                @endif
+              </div>
+              <p class="text-xs text-slate-600 mt-1">
+                {{ $isVerifiedMerchant
+                    ? 'Este comerciante luce la insignia oficial de Comercio Verificado en su tienda, directorio y productos.'
+                    : 'Este comerciante actualmente no tiene el chulito de verificación activo en la tienda pública.' }}
+              </p>
+            </div>
           </div>
-          <div>
-            <label class="block text-xs font-bold text-slate-600 mb-1">Subsector / Especialidad</label>
-            <input type="text" name="subsector_override" value="{{ $user->companyProfile->subsector_override }}" placeholder="Ej: Belleza, Agrícola, Glamping..." class="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-xs font-semibold">
-          </div>
-          <button type="submit" class="px-4 py-2.5 bg-[#006c47] text-white font-bold rounded-xl text-xs hover:bg-[#10B981]">
-            Guardar Rubro
-          </button>
-        </form>
+
+          <form method="POST" action="{{ route('analyst.users.toggle-verification', $user->id) }}" class="shrink-0">
+            @csrf @method('PATCH')
+            <button type="submit"
+                    class="w-full sm:w-auto px-5 py-3 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer {{ $isVerifiedMerchant ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-[#006c47] hover:bg-[#10B981] text-white' }}">
+              <span class="material-symbols-outlined text-base" style="font-variation-settings: 'FILL' 1">
+                {{ $isVerifiedMerchant ? 'verified_off' : 'verified' }}
+              </span>
+              <span>{{ $isVerifiedMerchant ? 'Quitar Chulito de Verificación' : 'Dar Chulito de Verificación ✓' }}</span>
+            </button>
+          </form>
+        </div>
       </div>
+
+      @if($merchantProfile)
+        <!-- Corrección manual del rubro sectorial (§2.1) -->
+        <div class="mt-8 pt-6 border-t border-slate-200">
+          <h3 class="text-base font-extrabold text-slate-900 mb-3 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[#006c47]">category</span>
+            Clasificación Sectorial y Subsector (Corrección Manual)
+          </h3>
+          <form method="POST" action="{{ route('analyst.users.sector', $user->id) }}" class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+            @csrf
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">Sector Principal</label>
+              <select name="sector_override" class="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-xs font-bold">
+                @foreach(\App\Services\Admin\SectorCensusService::definitions() as $sKey => $def)
+                  <option value="{{ $sKey }}" {{ ($merchantProfile->sector_override ?? '') === $sKey ? 'selected' : '' }}>{{ $def['title'] }}</option>
+                @endforeach
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">Subsector / Especialidad</label>
+              <input type="text" name="subsector_override" value="{{ $merchantProfile->subsector_override }}" placeholder="Ej: Belleza, Agrícola, Glamping..." class="w-full px-3 py-2.5 bg-slate-100 rounded-xl text-xs font-semibold">
+            </div>
+            <button type="submit" class="px-4 py-2.5 bg-[#006c47] text-white font-bold rounded-xl text-xs hover:bg-[#10B981] cursor-pointer">
+              Guardar Rubro
+            </button>
+          </form>
+        </div>
+      @endif
 
       <!-- Verificación KYC con motivos predefinidos de rechazo (§2.2) -->
       <div class="mt-8 pt-6 border-t border-slate-200">
@@ -156,41 +208,71 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
               <p class="text-xs font-bold text-slate-400 uppercase mb-1">Información Corporativa</p>
-              <p class="text-sm font-extrabold">{{ $user->companyProfile->company_name }}</p>
-              <p class="text-xs text-slate-600">Actividad declarada: {{ $user->companyProfile->business_type }}</p>
-              <p class="text-xs text-slate-600">Tel: {{ $user->companyProfile->phone }} · Dir: {{ $user->companyProfile->address }}</p>
+              <p class="text-sm font-extrabold">{{ $merchantProfile->company_name ?? $user->name }}</p>
+              <p class="text-xs text-slate-600">Actividad declarada: {{ $merchantProfile->business_type ?? 'Por definir' }}</p>
+              <p class="text-xs text-slate-600">Tel: {{ $merchantProfile->phone ?? $user->phone ?? 'Sin teléfono' }} · Dir: {{ $merchantProfile->address ?? 'Fusagasugá' }}</p>
             </div>
             <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
               <p class="text-xs font-bold text-slate-400 uppercase mb-1">Estado KYC Actual</p>
               @php
                 $statusMap = [
-                  'pending'  => ['bg-amber-100 text-amber-800', 'Pendiente (' . $user->companyProfile->created_at->diffInDays(now()) . ' días en cola)'],
-                  'approved' => ['bg-emerald-100 text-[#006c47]', 'Aprobado y Verificado'],
-                  'rejected' => ['bg-rose-100 text-rose-800', 'Rechazado']
+                  'pending'  => ['bg-amber-100 text-amber-800', 'Sin verificar / Pendiente'],
+                  'approved' => ['bg-emerald-100 text-[#006c47]', '✓ Aprobado y Verificado'],
+                  'rejected' => ['bg-rose-100 text-rose-800', '❌ Rechazado']
                 ];
-                $s = $statusMap[$user->companyProfile->kyc_status] ?? $statusMap['pending'];
+                $s = $statusMap[$currentKycStatus] ?? $statusMap['pending'];
               @endphp
               <span class="px-3 py-1 rounded-full text-xs font-bold {{ $s[0] }}">{{ $s[1] }}</span>
-              @if($user->companyProfile->kyc_notes)
-                <p class="mt-2 text-xs text-slate-600 italic">Observación: {{ $user->companyProfile->kyc_notes }}</p>
+              @if($merchantProfile?->kyc_notes)
+                <p class="mt-2 text-xs text-slate-600 italic">Observación: {{ $merchantProfile->kyc_notes }}</p>
               @endif
             </div>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <a href="{{ route('analyst.users.rut', $user->id) }}" target="_blank" class="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-[#10B981] transition-all">
-              <div class="flex items-center gap-3">
-                <span class="material-symbols-outlined text-red-600">picture_as_pdf</span>
+            @if($merchantProfile && $merchantProfile->rut_path)
+              <a href="{{ route('analyst.users.rut', $user->id) }}" target="_blank" class="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-[#10B981] transition-all">
+                <div class="flex items-center gap-3">
+                  <span class="material-symbols-outlined text-red-600">picture_as_pdf</span>
+                  <div>
+                    <span class="text-xs font-extrabold block">Descargar RUT Privado (DIAN)</span>
+                    <span class="text-[10px] text-slate-400">El acceso queda registrado en auditoría</span>
+                  </div>
+                </div>
+                <span class="material-symbols-outlined text-slate-400">open_in_new</span>
+              </a>
+            @else
+              <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3">
+                <span class="material-symbols-outlined text-amber-600">pending</span>
                 <div>
-                  <span class="text-xs font-extrabold block">Descargar RUT Privado (DIAN)</span>
-                  <span class="text-[10px] text-slate-400">El acceso queda registrado en auditoría</span>
+                  <span class="text-xs font-extrabold text-amber-900 block">RUT no adjuntado</span>
+                  <span class="text-[10px] text-amber-700">El comerciante no ha cargado su Formulario 001</span>
                 </div>
               </div>
-              <span class="material-symbols-outlined text-slate-400">open_in_new</span>
+            @endif
+
+            <a href="https://www.rues.org.co/" target="_blank" class="flex items-center justify-between p-4 bg-blue-50/60 border border-blue-200 rounded-xl hover:border-blue-500 transition-all">
+              <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-blue-600">verified</span>
+                <div>
+                  <span class="text-xs font-extrabold text-blue-950 block">Consultar RUES Nacional Oficial</span>
+                  <span class="text-[10px] text-blue-700">Validar matrícula activa en Cámaras de Comercio</span>
+                </div>
+              </div>
+              <span class="material-symbols-outlined text-blue-500">open_in_new</span>
             </a>
           </div>
 
           <form method="POST" action="{{ route('analyst.users.kyc', $user->id) }}" class="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+            <div class="p-3.5 bg-white border border-slate-200 rounded-xl text-xs space-y-2">
+              <span class="font-extrabold text-slate-800 block">🛡️ Protocolo de Certificación Segura de Comerciante:</span>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600">
+                <span class="flex items-center gap-1.5 font-medium">✓ RUT DIAN cotejado con NIT y CIIU</span>
+                <span class="flex items-center gap-1.5 font-medium">✓ Matrícula mercantil activa en RUES</span>
+                <span class="flex items-center gap-1.5 font-medium">✓ Cédula del Representante Legal cotejada</span>
+                <span class="flex items-center gap-1.5 font-medium">✓ Titularidad de cuenta bancaria coincidente</span>
+              </div>
+            </div>
             @csrf
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -209,11 +291,14 @@
               </div>
             </div>
 
-            <div class="flex gap-3 pt-1">
-              <button type="submit" name="kyc_status" value="approved" class="flex-1 py-2.5 bg-[#006c47] hover:bg-[#10B981] text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5">
-                <span class="material-symbols-outlined text-base">check_circle</span> Aprobar Documentación KYC
+            <div class="flex flex-wrap gap-3 pt-1">
+              <button type="submit" name="kyc_status" value="approved" class="flex-1 min-w-[180px] py-2.5 bg-[#006c47] hover:bg-[#10B981] text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                <span class="material-symbols-outlined text-base" style="font-variation-settings: 'FILL' 1">verified</span> Dar Verificación (Aprobar KYC)
               </button>
-              <button type="submit" name="kyc_status" value="rejected" class="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5">
+              <button type="submit" name="kyc_status" value="pending" class="flex-1 min-w-[180px] py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                <span class="material-symbols-outlined text-base">verified_off</span> Quitar Verificación (Sin chulito)
+              </button>
+              <button type="submit" name="kyc_status" value="rejected" class="flex-1 min-w-[180px] py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer">
                 <span class="material-symbols-outlined text-base">cancel</span> Rechazar con Motivo
               </button>
             </div>

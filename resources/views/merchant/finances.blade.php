@@ -2,9 +2,21 @@
 @section('title','Finanzas y Reportes')
 @section('content')
 <div class="max-w-7xl mx-auto px-6 py-8">
-  <div class="mb-8">
-    <h1 class="text-3xl font-['Manrope'] font-extrabold text-[#1b1c1c]">Finanzas y Reportes</h1>
-    <p class="text-[#3c4a41]">Balance general de tu actividad en FusaShop</p>
+  <div class="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div>
+      <h1 class="text-3xl font-['Manrope'] font-extrabold text-[#1b1c1c]">Finanzas y Reportes</h1>
+      <p class="text-[#3c4a41]">Balance general de tu actividad en FusaShop</p>
+    </div>
+    <div class="flex items-center gap-2.5 flex-wrap">
+      <a href="{{ route('merchant.reports') }}" class="px-4 py-2.5 bg-white border border-emerald-300 text-[#006c47] hover:bg-emerald-50 rounded-2xl font-extrabold text-xs flex items-center gap-2 shadow-xs transition-colors">
+        <span class="material-symbols-outlined text-[18px]">assessment</span>
+        <span>Reportes del Admin</span>
+      </a>
+      <a href="{{ route('merchant.reports.export-csv') }}" class="px-4 py-2.5 bg-[#006c47] hover:bg-[#10B981] text-white rounded-2xl font-extrabold text-xs flex items-center gap-2 shadow-xs transition-colors">
+        <span class="material-symbols-outlined text-[18px]">download</span>
+        <span>Descargar CSV (Excel)</span>
+      </a>
+    </div>
   </div>
 
   <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">

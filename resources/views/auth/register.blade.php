@@ -108,7 +108,7 @@
           <div class="grid grid-cols-2 gap-3">
             <!-- Comprar -->
             <label class="relative cursor-pointer block h-full">
-              <input type="radio" name="role" value="consumer" class="role-input absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer" {{ old('role','consumer')==='consumer' ? 'checked' : '' }} required/>
+              <input type="radio" name="role" value="consumer" class="role-input absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer" {{ old('role', request('role', 'consumer'))==='consumer' ? 'checked' : '' }} required/>
               <div class="role-box flex flex-col items-center gap-2 p-4 bg-surface-container rounded-2xl border-2 border-transparent transition-all h-full relative z-10">
                 <span class="material-symbols-outlined role-icon text-on-surface-variant text-3xl">shopping_bag</span>
                 <span class="text-sm font-bold text-on-surface">Comprar</span>
@@ -116,7 +116,7 @@
             </label>
             <!-- Vender -->
             <label class="relative cursor-pointer block h-full">
-              <input type="radio" name="role" value="merchant" class="role-input absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer" {{ old('role')==='merchant' ? 'checked' : '' }}/>
+              <input type="radio" name="role" value="merchant" class="role-input absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer" {{ old('role', request('role'))==='merchant' ? 'checked' : '' }}/>
               <div class="role-box flex flex-col items-center gap-2 p-4 bg-surface-container rounded-2xl border-2 border-transparent transition-all h-full relative z-10">
                 <span class="material-symbols-outlined role-icon text-on-surface-variant text-3xl">storefront</span>
                 <span class="text-sm font-bold text-on-surface">Vender</span>
@@ -146,6 +146,15 @@
             </div>
           </div>
 
+          <div class="form-enter md:col-span-2">
+            <label class="block text-sm font-semibold text-on-surface mb-1.5">Número de teléfono / WhatsApp <span class="text-error">*</span></label>
+            <div class="input-wrap">
+              <span class="material-symbols-outlined input-icon-box">call</span>
+              <input type="tel" name="phone" value="{{ old('phone') }}" required
+                class="input-field" placeholder="Ej. 310 123 4567" autocomplete="tel">
+            </div>
+          </div>
+
           <div class="form-enter">
             <label class="block text-sm font-semibold text-on-surface mb-1.5">Contraseña</label>
             <div class="input-wrap">
@@ -172,7 +181,7 @@
         </div>
 
         <div class="form-enter pt-2">
-          <button type="submit" id="reg-btn" class="w-full btn-primary py-4 text-sm shadow-lg shadow-primary/20">
+          <button type="submit" id="reg-btn" class="w-full btn-primary py-4 text-sm font-bold text-white rounded-2xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 hover:opacity-95 transition-all" style="background: linear-gradient(135deg, #10B981 0%, #047857 100%) !important;">
             <span class="material-symbols-outlined text-[20px]">how_to_reg</span> Crear mi cuenta
           </button>
           

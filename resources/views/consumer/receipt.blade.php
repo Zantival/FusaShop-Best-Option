@@ -5,15 +5,28 @@
 @section('content')
 <div class="max-w-3xl mx-auto px-6 py-12">
     <!-- Action Buttons (Hidden on print) -->
-    <div class="flex justify-between items-center mb-8 no-print">
+    <div class="flex flex-wrap justify-between items-center gap-3 mb-8 no-print">
         <a href="{{ route('consumer.orders') }}" class="flex items-center gap-2 text-on-surface-variant hover:text-primary transition-colors">
             <span class="material-symbols-outlined">arrow_back</span>
             Volver a mis pedidos
         </a>
-        <button onclick="window.print()" class="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:opacity-90 active:scale-95 transition-all">
-            <span class="material-symbols-outlined">print</span>
-            Imprimir Recibo
-        </button>
+        <div class="flex items-center gap-3">
+            @if($order->canBeCancelledByBuyer())
+                <form action="{{ route('consumer.orders.cancel', $order->id) }}" method="POST">
+                    @csrf
+                    @method('PATCH')
+                    <input type="hidden" name="reason" value="Cancelado por el comprador desde el recibo.">
+                    <button type="submit" class="flex items-center gap-2 px-5 py-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-xl font-bold transition-all cursor-pointer">
+                        <span class="material-symbols-outlined text-base">cancel</span>
+                        Cancelar Pedido
+                    </button>
+                </form>
+            @endif
+            <button onclick="window.print()" class="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:opacity-90 active:scale-95 transition-all cursor-pointer">
+                <span class="material-symbols-outlined">print</span>
+                Imprimir Recibo
+            </button>
+        </div>
     </div>
 
     <!-- Receipt Card -->
@@ -53,7 +66,11 @@
                     {{ ucfirst($order->payment_method === 'card' ? 'Tarjeta' : ($order->payment_method === 'transfer' ? 'Transferencia' : 'Efectivo')) }}
                 </div>
                 <div class="mt-4">
-                    <span class="px-3 py-1 bg-green-100 text-green-700 text-[10px] font-black rounded-full uppercase">Completado</span>
+                    @if($order->status === 'cancelled')
+                        <span class="px-3 py-1 bg-rose-100 text-rose-700 text-[10px] font-black rounded-full uppercase">Cancelado</span>
+                    @else
+                        <span class="px-3 py-1 bg-green-100 text-green-700 text-[10px] font-black rounded-full uppercase">{{ $order->stageLabel() }}</span>
+                    @endif
                 </div>
             </div>
         </div>

@@ -106,6 +106,12 @@ $specLabels = [
       <div class="pd-info">
         <div class="flex items-center gap-2 flex-wrap pd-fi" style="--d:.05s">
           <span class="pd-badge" style="background:{{ $glow1 }};border-color:{{ $glow2 }}">{{ $product->category }}</span>
+          @if($product->hasDiscount())
+            <span class="pd-badge" style="background:#ba1a1a;border-color:#ffdad6;color:#ffffff">🔥 -{{ $product->discount_percent }}% OFF</span>
+          @endif
+          @if($product->allows_points ?? true)
+            <span class="pd-badge" style="background:rgba(245,158,11,.18);border-color:rgba(251,191,36,.45);color:#fde68a">🪙 Aplica FusaCoins</span>
+          @endif
           @if($product->stock <= 5 && $product->stock > 0)
             <span class="pd-badge" style="background:rgba(252,211,77,.12);border-color:rgba(252,211,77,.3);color:#fde68a">⚠ Solo {{ $product->stock }} disp.</span>
           @elseif($product->stock <= 0)
@@ -125,25 +131,65 @@ $specLabels = [
           <span class="text-sm text-white/40">({{ $product->reviews->count() }} reseñas)</span>
         </div>
 
-        <div class="pd-fi" style="--d:.18s">
-          <div class="flex items-baseline gap-2">
-            <span class="text-5xl font-black text-white">${{ number_format($product->price,0,',','.') }}</span>
-            <span class="text-sm text-white/40">COP</span>
+        <div class="pd-fi space-y-2" style="--d:.18s">
+          @if($product->hasDiscount())
+            <div class="flex items-center gap-2.5 flex-wrap">
+              <span class="text-xs font-bold uppercase tracking-wider text-white/50">Precio real:</span>
+              <span class="text-lg font-bold text-white/50 line-through">${{ number_format($product->originalPrice(),0,',','.') }} COP</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-[#ba1a1a] text-white">-{{ $product->discount_percent }}% DESCUENTO</span>
+              <span class="text-xs font-bold text-emerald-400">Ahorras ${{ number_format($product->discountAmount(),0,',','.') }} COP</span>
+            </div>
+            <div class="flex items-baseline gap-2 flex-wrap">
+              <span class="text-xs font-extrabold uppercase tracking-wider text-emerald-400">Precio con descuento:</span>
+              <span class="text-5xl font-black text-white">${{ number_format($product->effectivePrice(),0,',','.') }}</span>
+              <span class="text-sm text-white/40">COP</span>
+            </div>
+          @else
+            <div class="flex items-baseline gap-2">
+              <span class="text-5xl font-black text-white">${{ number_format($product->effectivePrice(),0,',','.') }}</span>
+              <span class="text-sm text-white/40">COP</span>
+            </div>
+          @endif
+
+          @php
+            $detailCoinsEarned = max(1, (int) floor($product->effectivePrice() / 10000));
+          @endphp
+          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-400/30 text-amber-200 text-xs font-semibold">
+            <span class="material-symbols-outlined text-amber-400 text-base">toll</span>
+            @if($product->allows_points ?? true)
+              <span>Redime tus <strong>FusaCoins</strong> como descuento (1 pt = $100 COP) y gana <strong>+{{ $detailCoinsEarned }} FusaCoins</strong> con esta compra.</span>
+            @else
+              <span>Este producto no admite redención de puntos, pero acumulas <strong>+{{ $detailCoinsEarned }} FusaCoins</strong> al comprarlo.</span>
+            @endif
           </div>
         </div>
 
-        <a href="{{ route('consumer.merchant.profile', $product->merchant_id) }}" class="pd-merchant pd-fi" style="--d:.21s">
-          @if($product->merchant->companyProfile?->logo_path)
-            <img src="{{ Storage::url($product->merchant->companyProfile->logo_path) }}" class="w-10 h-10 rounded-full object-cover">
-          @else
-            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-black" style="background:{{ $from }}">{{ strtoupper(substr($product->merchant->name,0,1)) }}</div>
-          @endif
-          <div class="flex-1 min-w-0">
-            <p class="text-[9px] font-black text-white/30 uppercase tracking-widest">Vendido por</p>
-            <p class="font-bold text-sm text-white truncate">{{ e($product->merchant->companyProfile?->company_name ?? $product->merchant->name) }}</p>
-          </div>
-          <span class="material-symbols-outlined text-white/40">chevron_right</span>
-        </a>
+        <div class="flex items-center gap-2 pd-fi" style="--d:.21s">
+          <a href="{{ route('consumer.merchant.profile', $product->merchant_id) }}" class="pd-merchant flex-1">
+            @if($product->merchant->companyProfile?->logo_path)
+              <img src="{{ Storage::url($product->merchant->companyProfile->logo_path) }}" class="w-10 h-10 rounded-full object-cover">
+            @else
+              <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-black" style="background:{{ $from }}">{{ strtoupper(substr($product->merchant->name,0,1)) }}</div>
+            @endif
+            <div class="flex-1 min-w-0">
+              <p class="text-[9px] font-black text-white/30 uppercase tracking-widest">Vendido por</p>
+              <p class="font-bold text-sm text-white truncate flex items-center gap-1">
+                <span class="truncate">{{ e($product->merchant->companyProfile?->company_name ?? $product->merchant->name) }}</span>
+                @if($product->merchant->companyProfile?->kyc_status === 'approved')
+                  <span class="material-symbols-outlined text-[#6efcb9] text-[16px] shrink-0" style="font-variation-settings: 'FILL' 1" title="Comercio Verificado">verified</span>
+                @endif
+              </p>
+            </div>
+            <span class="material-symbols-outlined text-white/40">chevron_right</span>
+          </a>
+
+          <a href="{{ route('chat.show', ['user' => $product->merchant_id, 'product_id' => $product->id]) }}"
+             class="px-3.5 py-3 rounded-2xl bg-white/10 hover:bg-[#10B981] text-white border border-white/15 hover:border-[#10B981] transition-all flex items-center gap-1.5 text-xs font-bold shrink-0 shadow-sm"
+             title="Chatear con el vendedor sobre este producto">
+            <span class="material-symbols-outlined text-base">forum</span>
+            <span class="hidden sm:inline">Preguntar</span>
+          </a>
+        </div>
 
         @if($product->description)
           <p class="text-white/60 leading-relaxed text-sm pd-fi" style="--d:.24s">{{ e($product->description) }}</p>
@@ -236,11 +282,21 @@ $specLabels = [
                     <span class="btn-cart"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg></span>
                     <span class="btn-done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>¡Listo!</span>
                   </button>
+                  <button type="submit" id="btn-buy-now" name="buy_now" value="1" formaction="{{ route('consumer.cart.add') }}" class="px-7 py-3.5 bg-gradient-to-r from-orange-500 to-[#F97316] hover:from-orange-600 hover:to-orange-700 text-white font-black rounded-2xl text-sm transition-all shadow-lg hover:shadow-orange-500/30 flex items-center justify-center gap-2 shrink-0 cursor-pointer">
+                    <span class="material-symbols-outlined text-lg">flash_on</span>
+                    <span>Comprar Ahora</span>
+                  </button>
                 </div>
               </form>
             @endif
           @else
-            <div class="pd-fi"><a href="{{ route('login') }}?intended={{ urlencode(request()->fullUrl()) }}" class="add-to-cart no-underline" style="--background: linear-gradient(135deg,{{ $from }},{{ $to }}); --shadow: {{ $glow2 }}"><span class="btn-text">Añadir al carrito</span></a></div>
+            <div class="pd-fi flex items-center gap-3">
+              <a href="{{ route('login') }}?intended={{ urlencode(request()->fullUrl()) }}" class="add-to-cart no-underline flex-1" style="--background: linear-gradient(135deg,{{ $from }},{{ $to }}); --shadow: {{ $glow2 }}"><span class="btn-text">Añadir al carrito</span></a>
+              <a href="{{ route('login') }}?intended={{ urlencode(request()->fullUrl()) }}" class="px-7 py-3.5 bg-gradient-to-r from-orange-500 to-[#F97316] hover:from-orange-600 hover:to-orange-700 text-white font-black rounded-2xl text-sm transition-all shadow-lg hover:shadow-orange-500/30 flex items-center justify-center gap-2 shrink-0 no-underline cursor-pointer">
+                <span class="material-symbols-outlined text-lg">flash_on</span>
+                <span>Comprar Ahora</span>
+              </a>
+            </div>
           @endauth
         @endif
       </div>
@@ -574,7 +630,71 @@ $specLabels = [
   });
 
   const cf = document.getElementById('add-to-cart-form');
-  if (cf) { cf.addEventListener('submit', async e => { e.preventDefault(); const b = cf.querySelector('.add-to-cart'); if(b.classList.contains('added')) return; b.classList.add('added'); try { const r = await fetch(cf.action,{method:'POST',body:new FormData(cf),headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]')?.content||''}}); const d = await r.json(); if(d.success){ const ba = document.querySelector('.cart-badge'); if(ba) ba.textContent=d.cart_count; } setTimeout(()=>b.classList.remove('added'),2800); } catch(e){ b.classList.remove('added'); } }); }
+  if (cf) { 
+    cf.querySelectorAll('button[type="submit"]').forEach(btn => {
+      btn.addEventListener('click', () => { window.__lastClickedBtn = btn; });
+    });
+
+    cf.addEventListener('submit', async e => {
+      const isBuyNow = (e.submitter && (e.submitter.id === 'btn-buy-now' || e.submitter.name === 'buy_now')) ||
+                       (window.__lastClickedBtn && (window.__lastClickedBtn.id === 'btn-buy-now' || window.__lastClickedBtn.name === 'buy_now'));
+
+      if (isBuyNow) {
+        let bnInput = cf.querySelector('input[name="buy_now"]');
+        if (!bnInput) {
+          bnInput = document.createElement('input');
+          bnInput.type = 'hidden';
+          bnInput.name = 'buy_now';
+          bnInput.value = '1';
+          cf.appendChild(bnInput);
+        }
+        return; // Permite el POST nativo al servidor y la redirección inmediata a pagar
+      } 
+      e.preventDefault(); 
+      const b = cf.querySelector('.add-to-cart'); 
+      if (b && b.classList.contains('added')) return; 
+      if (b) b.classList.add('added'); 
+
+      try { 
+        const r = await fetch(cf.action, {
+          method: 'POST',
+          body: new FormData(cf),
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
+          }
+        }); 
+
+        if (r.status === 401) {
+          window.location.href = '{{ route("login") }}';
+          return;
+        }
+
+        const d = await r.json(); 
+        if (d.success) { 
+          // 1. Actualizar contador en la barra de navegación (desktop y móvil)
+          if (typeof window.updateCartBadge === 'function') {
+            window.updateCartBadge(d.cart_count);
+          }
+          // 2. Mostrar notificación flotante interactiva INMEDIATAMENTE
+          if (typeof window.showToast === 'function') {
+            window.showToast(d.message || '¡Producto añadido al carrito con éxito!', 'success', 'Ver Carrito', '{{ route("consumer.cart") }}');
+          }
+        } else if (d.message) {
+          if (typeof window.showToast === 'function') {
+            window.showToast(d.message, 'error');
+          }
+        }
+        setTimeout(() => { if (b) b.classList.remove('added'); }, 2800); 
+      } catch(err) { 
+        if (b) b.classList.remove('added'); 
+        if (typeof window.showToast === 'function') {
+          window.showToast('No se pudo añadir al carrito. Intenta de nuevo.', 'error');
+        }
+      } 
+    }); 
+  }
 })();
 </script>
 @endsection

@@ -28,8 +28,8 @@ class SecurityHeaders
             $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
         }
 
-        // Basic Content Security Policy (Allow trusted sources only)
-        $response->headers->set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://fonts.googleapis.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: http: https:; connect-src 'self' https://cdn.jsdelivr.net https://nominatim.openstreetmap.org https://router.project-osrm.org;");
+        // Basic Content Security Policy (Allow trusted sources + AlpineJS evaluation & blob previews)
+        $response->headers->set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://fonts.googleapis.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' blob: data: http: https: https://*.tile.openstreetmap.org https://tile.openstreetmap.org; media-src 'self' blob: data: http: https:; connect-src 'self' https://cdn.jsdelivr.net https://nominatim.openstreetmap.org https://router.project-osrm.org https://*.tile.openstreetmap.org; frame-src 'self' https://www.google.com https://maps.google.com https://*.google.com https://*.openstreetmap.org https://www.openstreetmap.org https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com;");
 
         return $response;
     }

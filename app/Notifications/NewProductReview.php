@@ -17,6 +17,7 @@ class NewProductReview extends Notification
             'message'    => $this->review->user->name . ' dejó ' . $this->review->rating . '★: ' . (strlen($this->review->comment ?? '') > 80 ? substr($this->review->comment,0,80).'…' : ($this->review->comment ?: '(sin comentario)')),
             'icon'       => 'star',
             'product_id' => $this->review->product_id,
+            'url'        => route('merchant.reviews'),
         ];
     }
 }

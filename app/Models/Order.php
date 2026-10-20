@@ -73,4 +73,14 @@ class Order extends Model
             default => 0,
         };
     }
+
+    /**
+     * Determina si el comprador puede cancelar el pedido directamente
+     * (mientras esté pendiente o en preparación y no tenga guía de transporte ni haya sido despachado).
+     */
+    public function canBeCancelledByBuyer(): bool
+    {
+        return in_array($this->status, ['pending', 'processing'], true)
+            && empty($this->tracking_number);
+    }
 }

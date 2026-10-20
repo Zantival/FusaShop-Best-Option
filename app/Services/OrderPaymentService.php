@@ -51,6 +51,15 @@ class OrderPaymentService
 
             $order = Order::where('reference', $reference)->lockForUpdate()->first();
             if (!$order) {
+                $bannerRequest = \App\Models\BannerRequest::where('payment_proof_path', $reference)
+                    ->orWhere('payment_proof_path', 'like', "%{$reference}%")
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($bannerRequest) {
+                    return $this->handleBannerTransaction($bannerRequest, $record, $status, $cents, $tx);
+                }
+
                 $record->update(['status' => $status, 'processed_at' => now()]);
                 IntegrationLog::failure('wompi', 'transaction.updated', null, "Referencia desconocida {$reference}");
                 return self::REJECTED;
@@ -122,12 +131,33 @@ class OrderPaymentService
         ])->save();
 
         $record->update(['processed_at' => now()]);
+        $this->awardPoints($order);
         $this->notifyMerchants($order);
+        $this->clearPurchasedItemsFromCart($order);
 
         GenerateEnviaShipment::dispatch($order->id)->afterCommit();
         IssueFactusInvoice::dispatch($order->id)->afterCommit();
 
         return self::APPROVED;
+    }
+
+    /** Retira del carrito del cliente únicamente los productos (y opciones) de este pedido pagado. */
+    private function clearPurchasedItemsFromCart(Order $order): void
+    {
+        $cart = \App\Models\Cart::where('user_id', $order->user_id)->first();
+        if (!$cart) {
+            return;
+        }
+
+        $cartItems = $cart->items()->get();
+        foreach ($order->items as $orderItem) {
+            $match = $cartItems->first(fn ($ci) => (int) $ci->product_id === (int) $orderItem->product_id
+                && json_encode($ci->selected_options) === json_encode($orderItem->selected_options));
+            if ($match) {
+                $match->delete();
+                $cartItems = $cartItems->reject(fn ($ci) => $ci->id === $match->id);
+            }
+        }
     }
 
     private function decline(Order $order, PaymentTransaction $record): string
@@ -205,6 +235,71 @@ class OrderPaymentService
                 $rec->increment('points', $share);
             }
         }
+    }
+
+    private function awardPoints(Order $order): void
+    {
+        $earned = (int) $order->points_earned;
+        $used = (int) $order->points_used;
+
+        if ($earned > 0 && $order->user_id) {
+            $subs = $this->merchantSubtotals($order);
+            $total = array_sum($subs) ?: 1;
+            $left = $earned;
+            $last = array_key_last($subs);
+            foreach ($subs as $mid => $sub) {
+                $share = $mid === $last ? $left : (int) floor($earned * $sub / $total);
+                $left -= $share;
+                if ($share > 0) {
+                    $rec = LoyaltyPoint::firstOrCreate(
+                        ['user_id' => $order->user_id, 'merchant_id' => $mid],
+                        ['points' => 0]
+                    );
+                    $rec->increment('points', $share);
+                }
+            }
+        }
+
+        if (($earned > 0 || $used > 0) && $order->user) {
+            $order->user->notify(new \App\Notifications\LoyaltyPointsNotification(
+                $order,
+                $earned,
+                $used,
+                (float) $order->discount
+            ));
+        }
+    }
+
+    private function handleBannerTransaction(\App\Models\BannerRequest $bannerRequest, PaymentTransaction $record, string $status, int $cents, array $tx): string
+    {
+        $expectedCents = (int) round(((float) $bannerRequest->cost) * 100);
+        if ($cents !== $expectedCents || strtoupper($tx['currency'] ?? 'COP') !== 'COP') {
+            $record->update(['status' => $status, 'processed_at' => now()]);
+            IntegrationLog::failure('wompi', 'banner.amount_mismatch', null, "Monto recibido {$cents} != esperado {$expectedCents}", ['banner_request_id' => $bannerRequest->id]);
+            return self::REJECTED;
+        }
+
+        $record->update(['status' => $status, 'processed_at' => now()]);
+
+        if ($status === 'APPROVED') {
+            IntegrationLog::success('wompi', 'banner.payment_approved', null, [
+                'banner_request_id' => $bannerRequest->id,
+                'transaction_id'    => $record->transaction_id,
+                'reference'         => $record->reference,
+                'amount_cents'      => $cents,
+            ]);
+            return self::APPROVED;
+        }
+
+        if (in_array($status, ['DECLINED', 'ERROR', 'VOIDED'], true)) {
+            $bannerRequest->update([
+                'status'           => 'rejected',
+                'rejection_reason' => 'Pago rechazado en pasarela Wompi (' . $status . ').',
+            ]);
+            return self::DECLINED;
+        }
+
+        return self::PENDING;
     }
 
     private function notifyMerchants(Order $order): void

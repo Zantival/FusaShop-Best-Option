@@ -29,6 +29,7 @@
 !/storage/logs/.gitignore
 /storage/app/public/*
 !/storage/app/public/.gitignore
+/storage/app/private/invoices/
 /public/*.mp4
 /public/*.mov
 /public/*.avi

@@ -74,10 +74,11 @@
           </div>
 
           <div>
-            <label class="block text-sm font-bold text-on-surface mb-2">Precio (COP) *</label>
+            <label class="block text-sm font-bold text-on-surface mb-2">Precio Base / Lista (COP) *</label>
             <div class="relative">
               <span class="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant font-bold text-sm">$</span>
-              <input type="number" name="price" value="{{ old('price', $product?->price) }}" min="0" step="100" required
+              <input type="number" name="price" id="price-input" value="{{ old('price', $product?->price) }}" min="0" step="100" required
+                oninput="updateDiscountPreview()"
                 class="w-full pl-8 pr-4 py-3 bg-surface-container-highest rounded-xl border-0 outline-none focus:ring-2 focus:ring-primary shadow-inner"
                 placeholder="45.000"/>
             </div>
@@ -217,15 +218,120 @@
           </div>
         </div>
 
-        <div class="mt-10 sm:col-span-2">
-          <label class="flex items-center gap-3 cursor-pointer">
+        @php
+          $currentDiscountPct = (int) old('discount_percent', $product?->discount_percent ?? 0);
+          $hasDiscountActive = (bool) old('has_discount', $currentDiscountPct > 0);
+        @endphp
+
+        <hr class="my-8 border-outline-variant/10">
+
+        <!-- PROMOCIONES, DESCUENTO (%) Y FUSACOINS -->
+        <div class="space-y-5">
+          <div>
+            <h3 class="text-sm font-bold text-on-surface flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-[#ba1a1a] text-lg">local_offer</span>
+              Promociones, Porcentaje de Descuento y FusaCoins
+            </h3>
+            <p class="text-[11px] text-on-surface-variant">Configura si tu producto está en oferta con un % de descuento y si acepta redención de FusaCoins.</p>
+          </div>
+
+          <!-- Bloque 1: Descuento en Porcentaje (%) -->
+          <div class="p-5 rounded-2xl bg-surface-container-low border border-outline-variant/25 space-y-4">
+            <label class="flex items-center justify-between gap-3 cursor-pointer">
+              <div class="flex items-center gap-3">
+                <div class="relative">
+                  <input type="hidden" name="has_discount" value="0">
+                  <input type="checkbox" name="has_discount" id="has-discount-toggle" value="1"
+                         onchange="toggleDiscountControls(this.checked)"
+                         class="sr-only peer" {{ $hasDiscountActive ? 'checked' : '' }}/>
+                  <div class="w-11 h-6 bg-outline-variant rounded-full peer-checked:bg-[#ba1a1a] transition-colors"></div>
+                  <div class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-sm"></div>
+                </div>
+                <div>
+                  <span class="font-bold text-sm text-on-surface flex items-center gap-1.5">
+                    Poner este producto en Descuento / Promoción
+                  </span>
+                  <p class="text-xs text-on-surface-variant">Muestra la etiqueta roja <strong>-% OFF</strong>, el precio anterior tachado y cobra el precio con descuento en el carrito y Wompi.</p>
+                </div>
+              </div>
+              <span id="discount-badge-preview" class="px-2.5 py-1 rounded-full text-xs font-black bg-[#ba1a1a] text-white {{ $hasDiscountActive && $currentDiscountPct > 0 ? '' : 'hidden' }}">
+                -{{ $currentDiscountPct }}% OFF
+              </span>
+            </label>
+
+            <div id="discount-controls-box" class="{{ $hasDiscountActive ? '' : 'hidden' }} pt-3 border-t border-outline-variant/20 space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+                <div>
+                  <label class="block text-xs font-bold text-on-surface mb-1.5">Porcentaje de descuento (1% a 90%)</label>
+                  <div class="relative">
+                    <input type="number" name="discount_percent" id="discount-percent-input"
+                           value="{{ $currentDiscountPct }}" min="0" max="90" step="1"
+                           oninput="updateDiscountPreview()"
+                           class="w-full pl-4 pr-10 py-2.5 bg-white rounded-xl border border-outline-variant/40 outline-none focus:ring-2 focus:ring-primary font-extrabold text-sm text-on-surface"
+                           placeholder="Ej: 20"/>
+                    <span class="absolute right-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant font-black text-sm">%</span>
+                  </div>
+                </div>
+
+                <div>
+                  <span class="block text-[10px] font-black uppercase text-on-surface-variant mb-1.5">Descuentos rápidos:</span>
+                  <div class="flex flex-wrap gap-1.5">
+                    @foreach([5, 10, 15, 20, 25, 30, 40, 50] as $presetPct)
+                      <button type="button" onclick="setQuickDiscount({{ $presetPct }})"
+                              class="px-2.5 py-1.5 rounded-lg text-xs font-extrabold bg-white border border-outline-variant/30 hover:border-[#ba1a1a] hover:bg-red-50 hover:text-[#ba1a1a] transition-all cursor-pointer">
+                        -{{ $presetPct }}%
+                      </button>
+                    @endforeach
+                  </div>
+                </div>
+              </div>
+
+              <!-- Resumen en vivo del precio con descuento -->
+              <div class="p-3.5 rounded-xl bg-white border border-emerald-200/80 flex flex-wrap items-center justify-between gap-3">
+                <div class="space-y-0.5">
+                  <span class="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Precio Original</span>
+                  <span id="preview-original-price" class="text-sm font-bold text-slate-400 line-through">$0 COP</span>
+                </div>
+                <div class="space-y-0.5">
+                  <span class="text-[10px] font-black uppercase tracking-wider text-[#ba1a1a] block">Ahorro del Cliente</span>
+                  <span id="preview-saved-amount" class="text-sm font-extrabold text-[#ba1a1a]">-$0 COP</span>
+                </div>
+                <div class="space-y-0.5 text-right">
+                  <span class="text-[10px] font-black uppercase tracking-wider text-[#006c47] block">Precio Final de Venta</span>
+                  <span id="preview-final-price" class="text-lg font-black text-[#006c47]">$0 COP</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bloque 2: FusaCoins -->
+          <div class="p-5 rounded-2xl bg-amber-50/60 border border-amber-200/70">
+            <label class="flex items-center gap-3 cursor-pointer">
+              <div class="relative shrink-0">
+                <input type="hidden" name="allows_points" value="0">
+                <input type="checkbox" name="allows_points" value="1" class="sr-only peer" {{ old('allows_points', $product?->allows_points ?? true) ? 'checked' : '' }}/>
+                <div class="w-11 h-6 bg-outline-variant rounded-full peer-checked:bg-amber-500 transition-colors"></div>
+                <div class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-sm"></div>
+              </div>
+              <div>
+                <span class="font-bold text-sm text-on-surface flex items-center gap-1.5">
+                  <span class="material-symbols-outlined text-amber-500 text-lg">toll</span>
+                  Permitir redimir FusaCoins en este producto
+                </span>
+                <p class="text-xs text-on-surface-variant">Los compradores verán la insignia dorada <strong>"Aplica FusaCoins"</strong> y podrán canjear sus puntos como descuento (1 FusaCoin = $100 COP, hasta $50.000 COP por compra).</p>
+              </div>
+            </label>
+          </div>
+
+          <!-- Bloque 3: Visibilidad -->
+          <label class="flex items-center gap-3 cursor-pointer pt-2">
             <div class="relative">
               <input type="hidden" name="is_active" value="0">
               <input type="checkbox" name="is_active" value="1" class="sr-only peer" {{ old('is_active', $product?->is_active ?? true) ? 'checked' : '' }}/>
               <div class="w-11 h-6 bg-outline-variant rounded-full peer-checked:bg-primary transition-colors"></div>
               <div class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-sm"></div>
             </div>
-            <span class="font-bold text-sm text-on-surface">Producto activo y visible</span>
+            <span class="font-bold text-sm text-on-surface">Producto activo y visible en el catálogo</span>
           </label>
         </div>
 
@@ -350,6 +456,69 @@
       r.readAsDataURL(input.files[0]);
     }
   };
+
+  function fmtCop(num) {
+    return '$' + Math.round(num || 0).toLocaleString('es-CO') + ' COP';
+  }
+
+  function toggleDiscountControls(checked) {
+    const box = document.getElementById('discount-controls-box');
+    const pctInput = document.getElementById('discount-percent-input');
+    if (checked) {
+      box?.classList.remove('hidden');
+      if (pctInput && (!pctInput.value || parseInt(pctInput.value, 10) <= 0)) {
+        pctInput.value = 10;
+      }
+    } else {
+      box?.classList.add('hidden');
+      if (pctInput) pctInput.value = 0;
+    }
+    updateDiscountPreview();
+  }
+
+  function setQuickDiscount(pct) {
+    const toggle = document.getElementById('has-discount-toggle');
+    const pctInput = document.getElementById('discount-percent-input');
+    if (toggle && !toggle.checked) {
+      toggle.checked = true;
+      document.getElementById('discount-controls-box')?.classList.remove('hidden');
+    }
+    if (pctInput) pctInput.value = pct;
+    updateDiscountPreview();
+  }
+
+  function updateDiscountPreview() {
+    const priceEl = document.getElementById('price-input');
+    const toggle = document.getElementById('has-discount-toggle');
+    const pctEl = document.getElementById('discount-percent-input');
+    const badgeEl = document.getElementById('discount-badge-preview');
+
+    const basePrice = Math.max(0, parseFloat(priceEl?.value || '0') || 0);
+    const isDiscounted = toggle ? toggle.checked : false;
+    const pct = isDiscounted ? Math.min(90, Math.max(0, parseInt(pctEl?.value || '0', 10) || 0)) : 0;
+
+    const finalPrice = pct > 0 ? Math.round(basePrice * (1 - pct / 100)) : basePrice;
+    const saved = Math.max(0, basePrice - finalPrice);
+
+    const origSpan = document.getElementById('preview-original-price');
+    const savedSpan = document.getElementById('preview-saved-amount');
+    const finalSpan = document.getElementById('preview-final-price');
+
+    if (origSpan) origSpan.textContent = fmtCop(basePrice);
+    if (savedSpan) savedSpan.textContent = '-' + fmtCop(saved) + (pct > 0 ? ` (${pct}%)` : '');
+    if (finalSpan) finalSpan.textContent = fmtCop(finalPrice);
+
+    if (badgeEl) {
+      if (isDiscounted && pct > 0) {
+        badgeEl.textContent = `-${pct}% OFF`;
+        badgeEl.classList.remove('hidden');
+      } else {
+        badgeEl.classList.add('hidden');
+      }
+    }
+  }
+
+  updateDiscountPreview();
 </script>
 @endpush
 @endsection

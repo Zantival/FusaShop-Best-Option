@@ -2,7 +2,29 @@
 @section('title', 'Mi Cuenta | FusaShop Sumapaz')
 
 @section('content')
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" x-data="{ currentTab: 'overview', qrModalOpen: false, activeQrData: null }">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" 
+     x-data="{ 
+       currentTab: (new URLSearchParams(window.location.search).get('tab')) || '{{ $initialTab ?? request('tab', 'overview') }}', 
+       qrModalOpen: false, 
+       activeQrData: null,
+       init() {
+         window.switchProfileTab = (tab) => {
+           this.currentTab = tab;
+           try {
+             const url = new URL(window.location);
+             url.searchParams.set('tab', tab);
+             window.history.pushState({}, '', url);
+           } catch(e) {}
+           const userDropdown = document.getElementById('user-dropdown');
+           if (userDropdown) userDropdown.classList.add('hidden');
+           window.scrollTo({ top: 0, behavior: 'smooth' });
+         };
+         window.addEventListener('popstate', () => {
+           const tab = new URLSearchParams(window.location.search).get('tab');
+           if (tab) this.currentTab = tab;
+         });
+       }
+     }">
 
   <!-- Breadcrumb & Top Salutation -->
   <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 bg-surface-container-lowest p-6 rounded-3xl shadow-card border border-outline-variant/20">
@@ -16,11 +38,13 @@
         <div class="absolute bottom-0 right-0 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white" title="Usuario Verificado"></div>
       </div>
       <div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <h1 class="text-2xl sm:text-3xl font-['Manrope'] font-black text-on-background">¡Hola, {{ explode(' ', $user->name)[0] }}!</h1>
-          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#6efcb9]/30 text-[#006c47] border border-[#6efcb9] uppercase tracking-wider">Comprador Sumapaz</span>
+          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#6efcb9]/30 text-[#006c47] border border-[#6efcb9] uppercase tracking-wider">
+            @if($user->isMerchant()) Comerciante @elseif($user->isAnalyst()) Administrador @else Comprador Sumapaz @endif
+          </span>
         </div>
-        <p class="text-xs sm:text-sm text-on-surface-variant mt-0.5">Gestiona tus compras, billetera FusaCoins, envíos en tiempo real y facturas DIAN</p>
+        <p class="text-xs sm:text-sm text-on-surface-variant mt-0.5">Gestiona tus compras, billetera FusaCoins y envíos activos</p>
       </div>
     </div>
 
@@ -38,6 +62,20 @@
     </div>
   </div>
 
+  @if(session('success'))
+    <div class="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-emerald-800 text-sm font-bold shadow-sm animate-in fade-in">
+      <span class="material-symbols-outlined text-emerald-600 text-[22px]">check_circle</span>
+      <span>{{ session('success') }}</span>
+    </div>
+  @endif
+
+  @if(session('error'))
+    <div class="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-3 text-rose-800 text-sm font-bold shadow-sm animate-in fade-in">
+      <span class="material-symbols-outlined text-rose-600 text-[22px]">error</span>
+      <span>{{ session('error') }}</span>
+    </div>
+  @endif
+
   <!-- Main Grid Layout: Sidebar Navigation + Content Panel -->
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
     
@@ -45,12 +83,12 @@
     <aside class="lg:col-span-3 bg-surface-container-lowest rounded-3xl p-5 shadow-card border border-outline-variant/20 sticky top-24 space-y-2">
       <div class="px-3 py-2 text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Navegación Mi Cuenta</div>
       
-      <button type="button" @click="currentTab = 'overview'" :class="currentTab === 'overview' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center gap-3 transition-all">
+      <button type="button" @click="currentTab = 'overview'" :class="currentTab === 'overview' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center gap-3 transition-all cursor-pointer">
         <span class="material-symbols-outlined text-[20px]">dashboard</span>
         <span>Panel General</span>
       </button>
 
-      <button type="button" @click="currentTab = 'wallet'" :class="currentTab === 'wallet' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center justify-between transition-all">
+      <button type="button" @click="currentTab = 'wallet'" :class="currentTab === 'wallet' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center justify-between transition-all cursor-pointer">
         <div class="flex items-center gap-3">
           <span class="material-symbols-outlined text-[20px]">account_balance_wallet</span>
           <span>Billetera FusaCoins</span>
@@ -58,7 +96,7 @@
         <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800">{{ number_format($userPoints) }}</span>
       </button>
 
-      <button type="button" @click="currentTab = 'tracking'" :class="currentTab === 'tracking' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center justify-between transition-all">
+      <button type="button" @click="currentTab = 'tracking'" :class="currentTab === 'tracking' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center justify-between transition-all cursor-pointer">
         <div class="flex items-center gap-3">
           <span class="material-symbols-outlined text-[20px]">local_shipping</span>
           <span>Rastreador Envia.com</span>
@@ -68,24 +106,19 @@
         @endif
       </button>
 
-      <button type="button" @click="currentTab = 'o2o'" :class="currentTab === 'o2o' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center gap-3 transition-all">
+      <button type="button" @click="currentTab = 'o2o'" :class="currentTab === 'o2o' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center gap-3 transition-all cursor-pointer">
         <span class="material-symbols-outlined text-[20px]">qr_code_scanner</span>
-        <span>Mis Reservas O2O</span>
+        <span>Mis Reservas con QR</span>
       </button>
 
-      <button type="button" @click="currentTab = 'invoices'" :class="currentTab === 'invoices' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center gap-3 transition-all">
+      <button type="button" @click="currentTab = 'invoices'" :class="currentTab === 'invoices' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center gap-3 transition-all cursor-pointer">
         <span class="material-symbols-outlined text-[20px]">receipt_long</span>
         <span>Facturación DIAN (Factus)</span>
       </button>
 
-      <button type="button" @click="currentTab = 'addresses'" :class="currentTab === 'addresses' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center gap-3 transition-all">
+      <button type="button" @click="currentTab = 'addresses'" :class="currentTab === 'addresses' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center gap-3 transition-all cursor-pointer">
         <span class="material-symbols-outlined text-[20px]">pin_drop</span>
         <span>Libreta de Direcciones</span>
-      </button>
-
-      <button type="button" @click="currentTab = 'profile'" :class="currentTab === 'profile' ? 'bg-primary text-white font-bold shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container font-semibold'" class="w-full text-left px-4 py-3 rounded-2xl text-sm flex items-center gap-3 transition-all">
-        <span class="material-symbols-outlined text-[20px]">manage_accounts</span>
-        <span>Perfil y Seguridad</span>
       </button>
 
       <div class="pt-4 mt-4 border-t border-outline-variant/20">
@@ -103,42 +136,61 @@
       <!-- ========================================== -->
       <div x-show="currentTab === 'overview'" class="space-y-6">
 
+        <!-- 4 Feature Highlight Cards (Incluyendo Editar Perfil) -->
         <!-- 3 Feature Highlight Cards -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
           <!-- Card 1: FusaCoins -->
-          <div @click="currentTab = 'wallet'" class="cursor-pointer bg-gradient-to-br from-white to-amber-50/50 p-6 rounded-3xl shadow-card border border-amber-200/50 hover:border-amber-400 transition-all group">
-            <div class="flex items-center justify-between mb-4">
-              <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <span class="material-symbols-outlined text-2xl">toll</span>
+          <div @click="currentTab = 'wallet'" class="cursor-pointer bg-gradient-to-br from-white to-amber-50/50 p-5 rounded-3xl shadow-card border border-amber-200/50 hover:border-amber-400 transition-all group flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3">
+                <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <span class="material-symbols-outlined text-2xl">toll</span>
+                </div>
+                <span class="text-[11px] font-bold text-amber-700 bg-amber-100 px-2.5 py-0.5 rounded-full">Billetera</span>
               </div>
-              <span class="text-xs font-bold text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">Billetera</span>
+              <p class="text-2xl font-black text-on-background">{{ number_format($userPoints, 0, ',', '.') }}</p>
+              <p class="text-xs text-on-surface-variant font-medium mt-0.5">FusaCoins disponibles</p>
             </div>
-            <p class="text-2xl font-black text-on-background">{{ number_format($userPoints, 0, ',', '.') }}</p>
-            <p class="text-xs text-on-surface-variant font-medium mt-1">FusaCoins disponibles para compras o canjes</p>
+            <div class="mt-4 pt-2 border-t border-amber-100 text-xs font-bold text-amber-700 flex items-center justify-between">
+              <span>Ver canjes y saldo</span>
+              <span>→</span>
+            </div>
           </div>
 
           <!-- Card 2: Envíos en Camino -->
-          <div @click="currentTab = 'tracking'" class="cursor-pointer bg-gradient-to-br from-white to-emerald-50/50 p-6 rounded-3xl shadow-card border border-emerald-200/50 hover:border-emerald-400 transition-all group">
-            <div class="flex items-center justify-between mb-4">
-              <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <span class="material-symbols-outlined text-2xl">local_shipping</span>
+          <div @click="currentTab = 'tracking'" class="cursor-pointer bg-gradient-to-br from-white to-emerald-50/50 p-5 rounded-3xl shadow-card border border-emerald-200/50 hover:border-emerald-400 transition-all group flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3">
+                <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <span class="material-symbols-outlined text-2xl">local_shipping</span>
+                </div>
+                <span class="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">Logística</span>
               </div>
-              <span class="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-full">Logística</span>
+              <p class="text-2xl font-black text-on-background">{{ $activeShipments->count() }}</p>
+              <p class="text-xs text-on-surface-variant font-medium mt-0.5">Paquetes en preparación</p>
             </div>
-            <p class="text-2xl font-black text-on-background">{{ $activeShipments->count() }}</p>
-            <p class="text-xs text-on-surface-variant font-medium mt-1">Paquetes en preparación o en ruta Envia.com</p>
+            <div class="mt-4 pt-2 border-t border-emerald-100 text-xs font-bold text-emerald-700 flex items-center justify-between">
+              <span>Rastrear pedidos</span>
+              <span>→</span>
+            </div>
           </div>
 
           <!-- Card 3: Reservas O2O Activas -->
-          <div @click="currentTab = 'o2o'" class="cursor-pointer bg-gradient-to-br from-white to-emerald-50/50 p-6 rounded-3xl shadow-card border border-emerald-200/50 hover:border-emerald-400 transition-all group">
-            <div class="flex items-center justify-between mb-4">
-              <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <span class="material-symbols-outlined text-2xl">confirmation_number</span>
+          <div @click="currentTab = 'o2o'" class="cursor-pointer bg-gradient-to-br from-white to-orange-50/50 p-5 rounded-3xl shadow-card border border-orange-200/50 hover:border-orange-400 transition-all group flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3">
+                <div class="w-12 h-12 rounded-2xl bg-orange-500/10 text-orange-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <span class="material-symbols-outlined text-2xl">confirmation_number</span>
+                </div>
+                <span class="text-[11px] font-bold text-orange-700 bg-orange-100 px-2.5 py-0.5 rounded-full">Vouchers QR</span>
               </div>
-              <span class="text-xs font-bold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-full">Vouchers QR</span>
+              <p class="text-2xl font-black text-on-background">{{ $o2oOrders->count() }}</p>
+              <p class="text-xs text-on-surface-variant font-medium mt-0.5">Experiencias y reservas</p>
             </div>
-            <p class="text-2xl font-black text-on-background">{{ $o2oOrders->count() }}</p>
-            <p class="text-xs text-on-surface-variant font-medium mt-1">Experiencias y reservas presenciales Sumapaz</p>
+            <div class="mt-4 pt-2 border-t border-orange-100 text-xs font-bold text-orange-700 flex items-center justify-between">
+              <span>Ver vouchers QR</span>
+              <span>→</span>
+            </div>
           </div>
         </div>
 
@@ -234,12 +286,18 @@
               @foreach($orders->take(5) as $order)
                 <div class="bg-surface-container-low rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 border border-outline-variant/10 hover:border-primary/30 transition-all">
                   <div class="space-y-1">
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-2 flex-wrap">
                       <span class="font-mono font-bold text-xs text-on-surface">#{{ $order->id }}</span>
                       <span class="text-xs text-on-surface-variant">· {{ $order->created_at->format('d/m/Y H:i') }}</span>
-                      <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {{ $order->payment_status === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800' }}">
-                        {{ $order->payment_status === 'paid' ? 'Pagado' : 'Pendiente' }}
-                      </span>
+                      @if($order->status === 'cancelled')
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                          Cancelado
+                        </span>
+                      @else
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {{ $order->payment_status === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800' }}">
+                          {{ $order->payment_status === 'paid' ? 'Pagado' : 'Pendiente' }}
+                        </span>
+                      @endif
                     </div>
                     <p class="text-sm font-bold text-on-surface">
                       {{ $order->items->first()->product->name ?? 'Producto de la orden' }}
@@ -264,6 +322,16 @@
                       <a href="{{ route('consumer.orders.receipt', $order->id) }}" class="px-3.5 py-2 bg-surface-container hover:bg-surface-container-highest rounded-xl text-xs font-bold text-on-surface transition-all flex items-center gap-1">
                         <span class="material-symbols-outlined text-sm">receipt</span> Recibo
                       </a>
+                      @if($order->canBeCancelledByBuyer())
+                        <form action="{{ route('consumer.orders.cancel', $order->id) }}" method="POST" class="inline">
+                          @csrf
+                          @method('PATCH')
+                          <input type="hidden" name="reason" value="Cancelado por el comprador desde su perfil.">
+                          <button type="submit" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-bold text-rose-700 transition-all flex items-center gap-1 cursor-pointer">
+                            <span class="material-symbols-outlined text-sm">cancel</span> Cancelar
+                          </button>
+                        </form>
+                      @endif
                     </div>
                   </div>
                 </div>
@@ -499,7 +567,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
               <h2 class="text-xl font-['Manrope'] font-black text-on-background flex items-center gap-2">
-                <span class="material-symbols-outlined text-[#F97316]">qr_code_2</span> Mis Reservas y Experiencias O2O
+                <span class="material-symbols-outlined text-[#F97316]">qr_code_2</span> Mis Reservas y Experiencias con QR
               </h2>
               <p class="text-xs text-on-surface-variant mt-1">Vouchers digitales para presentar y redimir presencialmente en hoteles, restaurantes y viveros del Sumapaz</p>
             </div>
@@ -512,8 +580,8 @@
             <div class="text-center py-12 bg-surface-container-low rounded-2xl border-2 border-dashed border-outline-variant/30">
               <span class="material-symbols-outlined text-5xl text-on-surface-variant/40 mb-2">hotel</span>
               <p class="text-sm font-bold text-on-surface">No registras reservas turísticas u O2O activas</p>
-              <p class="text-xs text-on-surface-variant mt-1">Reserva glampings en Chinauta, mesas en restaurantes típicos o recorridos florales con confirmación inmediata por QR.</p>
-              <a href="{{ route('consumer.home') }}#seccion-o2o" class="mt-4 inline-block px-5 py-2.5 bg-[#F97316] text-white text-xs font-bold rounded-xl shadow-md hover:opacity-95 transition-all">Ver Ofertas O2O en Fusagasugá</a>
+              <p class="text-xs text-on-surface-variant mt-1">Reserva hoteles, mesas en restaurantes típicos y experiencias turísticas en Fusagasugá con confirmación inmediata por QR.</p>
+              <a href="{{ route('consumer.home') }}#seccion-o2o" class="mt-4 inline-block px-5 py-2.5 bg-[#F97316] text-white text-xs font-bold rounded-xl shadow-md hover:opacity-95 transition-all">Ver Hoteles y Restaurantes en Fusagasugá</a>
             </div>
           @else
             <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -528,7 +596,7 @@
                   <div>
                     <div class="flex items-center justify-between mb-3">
                       <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-orange-100 text-orange-800 uppercase tracking-wider">
-                        Voucher O2O Válido
+                        Voucher QR Válido
                       </span>
                       <span class="text-xs font-mono font-bold text-on-surface-variant">#VOUCHER-{{ $order->id }}</span>
                     </div>
@@ -703,77 +771,6 @@
         </div>
       </div>
 
-      <!-- ========================================== -->
-      <!-- TAB 7: PERFIL PERSONAL Y SEGURIDAD -->
-      <!-- ========================================== -->
-      <div x-show="currentTab === 'profile'" style="display: none;" class="space-y-6">
-        <div class="bg-surface-container-lowest rounded-3xl p-6 sm:p-8 shadow-card border border-outline-variant/20">
-          <div class="mb-6">
-            <h2 class="text-xl font-['Manrope'] font-black text-on-background flex items-center gap-2">
-              <span class="material-symbols-outlined text-primary">manage_accounts</span> Datos Personales y Seguridad
-            </h2>
-            <p class="text-xs text-on-surface-variant mt-1">Actualiza tus credenciales, información de facturación y fotografía de perfil</p>
-          </div>
-
-          <form method="POST" action="{{ route('account.profile.update') }}" enctype="multipart/form-data" class="space-y-6">
-            @csrf
-            @method('PUT')
-
-            @if($errors->any())
-              <div class="bg-error-container text-error p-4 rounded-2xl text-xs font-bold">
-                <ul class="list-disc list-inside">
-                  @foreach($errors->all() as $err)
-                    <li>{{ $err }}</li>
-                  @endforeach
-                </ul>
-              </div>
-            @endif
-
-            <div class="flex items-center gap-6 pb-6 border-b border-outline-variant/20">
-              <div class="w-20 h-20 rounded-2xl overflow-hidden bg-surface-container border-2 border-outline-variant/50 shrink-0 flex items-center justify-center shadow-inner">
-                @if($user->avatarUrl())
-                  <img src="{{ $user->avatarUrl() }}" alt="{{ $user->name }}" class="w-full h-full object-cover">
-                @else
-                  <span class="material-symbols-outlined text-4xl text-on-surface-variant">person</span>
-                @endif
-              </div>
-              <div class="flex-1">
-                <label class="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Fotografía de Perfil (Avatar)</label>
-                <input type="file" name="avatar" accept="image/*" class="block w-full text-xs text-on-surface-variant file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary file:text-white hover:file:opacity-90 transition-all cursor-pointer">
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label class="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Nombre Completo</label>
-                <input type="text" name="name" value="{{ old('name', $user->name) }}" class="w-full bg-surface-container-low rounded-xl border border-outline-variant/30 p-3 text-xs font-medium text-on-surface outline-none focus:ring-2 focus:ring-primary/20 transition-all" required>
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Correo Electrónico</label>
-                <input type="email" name="email" value="{{ old('email', $user->email) }}" class="w-full bg-surface-container-low rounded-xl border border-outline-variant/30 p-3 text-xs font-medium text-on-surface outline-none focus:ring-2 focus:ring-primary/20 transition-all" required>
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Teléfono Móvil (WhatsApp)</label>
-                <input type="text" name="phone" value="{{ old('phone', $user->phone) }}" placeholder="300 123 4567" class="w-full bg-surface-container-low rounded-xl border border-outline-variant/30 p-3 text-xs font-medium text-on-surface outline-none focus:ring-2 focus:ring-primary/20 transition-all">
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Dirección de Envío Principal</label>
-                <input type="text" name="address" value="{{ old('address', $user->address) }}" placeholder="Ej. Calle 11 # 6-25, Fusagasugá" class="w-full bg-surface-container-low rounded-xl border border-outline-variant/30 p-3 text-xs font-medium text-on-surface outline-none focus:ring-2 focus:ring-primary/20 transition-all">
-              </div>
-            </div>
-
-            <div class="pt-4 flex justify-end">
-              <button type="submit" class="px-6 py-3 bg-primary text-white font-bold text-xs rounded-xl hover:opacity-95 active:scale-95 transition-all shadow-md flex items-center gap-2">
-                <span class="material-symbols-outlined text-[16px]">save</span> Guardar Cambios
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-
     </main>
   </div>
 
@@ -781,7 +778,7 @@
   <div x-show="qrModalOpen" style="display: none;" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" @click.self="qrModalOpen = false">
     <div class="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl border border-outline-variant/20 text-center space-y-4" @click.stop>
       <div class="flex items-center justify-between">
-        <span class="text-xs font-black uppercase tracking-wider text-orange-600 bg-orange-100 px-3 py-1 rounded-full">Voucher Presencial O2O</span>
+        <span class="text-xs font-black uppercase tracking-wider text-orange-600 bg-orange-100 px-3 py-1 rounded-full">Voucher Presencial con QR</span>
         <button type="button" @click="qrModalOpen = false" class="p-1 rounded-full hover:bg-surface-container text-on-surface-variant">
           <span class="material-symbols-outlined">close</span>
         </button>
